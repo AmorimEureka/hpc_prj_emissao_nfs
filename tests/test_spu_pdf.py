@@ -28,7 +28,10 @@ def test_parses_report_competence_with_mv_font_variations(label: str) -> None:
     assert _parse_report_competencia(label) == date(2026, 7, 1)
 
 
-@pytest.mark.parametrize("label", ("Atendimento", "Alêndimento"))
+@pytest.mark.parametrize(
+    "label",
+    ("Atendimento", "Alêndimento", "Alendim€nto"),
+)
 def test_recognizes_report_attendance_header_with_mv_font_variations(
     label: str,
 ) -> None:

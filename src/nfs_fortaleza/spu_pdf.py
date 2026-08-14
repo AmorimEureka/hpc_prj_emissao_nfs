@@ -136,7 +136,7 @@ def _parse_report_competencia(text: str) -> date | None:
 
 def _is_report_atendimento_header(text: str) -> bool:
     folded = _fold(text)
-    return folded.startswith("at") or folded.endswith("endimento")
+    return folded.startswith(("at", "al")) and folded.endswith("nto")
 
 
 def _cluster_words_by_top(
