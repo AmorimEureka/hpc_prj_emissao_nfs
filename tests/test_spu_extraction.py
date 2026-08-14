@@ -12,6 +12,7 @@ from nfs_fortaleza.spu_extraction import (
     SpuExtractionConfigurationError,
     SpuExtractionPayload,
     _competencia_unica_remessa,
+    _complete_competencia_unica_processo,
     _process_row,
     _split_nuexo_rows,
     extract_and_load_tramitando_reports,
@@ -43,6 +44,20 @@ def test_uses_oracle_competence_when_remessa_has_single_month() -> None:
     ]
 
     assert _competencia_unica_remessa(candidates) == date(2026, 7, 1)
+
+
+def test_completes_missing_competence_from_single_process_month() -> None:
+    rows = [
+        {"competencia": date(2026, 7, 1)},
+        {"competencia": None},
+    ]
+
+    _complete_competencia_unica_processo(rows)
+
+    assert [row["competencia"] for row in rows] == [
+        date(2026, 7, 1),
+        date(2026, 7, 1),
+    ]
     assert EMPENHO_TABLE_NAME == "processos_empenho_ipm"
     assert NOTA_FISCAL_TABLE_NAME == "processos_nota_fiscal_ipm"
     assert TRAMITANDO_REPORT_TABLE_NAME == "processos_relatorios_tramitando_ipm"

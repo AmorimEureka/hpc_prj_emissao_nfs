@@ -589,6 +589,7 @@ def extract_and_load_tramitando_reports(
                             "interpretáveis."
                         )
                     _enrich_tramitando_report_rows(settings, rows)
+                    _complete_competencia_unica_processo(rows)
                     linhas_sem_competencia = sum(
                         row.get("competencia") is None for row in rows
                     )
@@ -756,6 +757,22 @@ def _competencia_unica_remessa(candidates: list[tuple[Any, ...]]):
         candidate[5] for candidate in candidates if candidate[5] is not None
     }
     return next(iter(competencias)) if len(competencias) == 1 else None
+
+
+def _complete_competencia_unica_processo(
+    rows: list[dict[str, Any]],
+) -> None:
+    competencias = {
+        row["competencia"]
+        for row in rows
+        if row.get("competencia") is not None
+    }
+    if len(competencias) != 1:
+        return
+    competencia = next(iter(competencias))
+    for row in rows:
+        if row.get("competencia") is None:
+            row["competencia"] = competencia
 
 
 def _spu_pipeline(settings: SpuSettings):
