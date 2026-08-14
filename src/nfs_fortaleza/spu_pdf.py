@@ -314,7 +314,12 @@ def _parse_competencia(value: str) -> date | None:
     match = re.search(r"\b(0?[1-9]|1[0-2])[/\-](\d{4})\b", value)
     if match:
         return date(int(match.group(2)), int(match.group(1)), 1)
-    parsed = _parse_date(value) if _optional(value) else None
+    if not _optional(value):
+        return None
+    try:
+        parsed = _parse_date(value)
+    except SpuPortalError:
+        return None
     return parsed.replace(day=1) if parsed else None
 
 
