@@ -6,6 +6,7 @@ import pytest
 
 import nfs_fortaleza.spu_pdf as spu_pdf
 from nfs_fortaleza.spu_pdf import (
+    _is_report_atendimento_header,
     _parse_report_competencia,
     parse_legacy_saude_cogestao_pages,
     parse_nuexo_text,
@@ -25,6 +26,13 @@ from nfs_fortaleza.spu_portal import SpuDocument
 )
 def test_parses_report_competence_with_mv_font_variations(label: str) -> None:
     assert _parse_report_competencia(label) == date(2026, 7, 1)
+
+
+@pytest.mark.parametrize("label", ("Atendimento", "Alêndimento"))
+def test_recognizes_report_attendance_header_with_mv_font_variations(
+    label: str,
+) -> None:
+    assert _is_report_atendimento_header(label)
 
 
 SUMMARY = [

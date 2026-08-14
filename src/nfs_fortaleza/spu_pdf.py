@@ -75,7 +75,7 @@ def _parse_tramitando_report_layout(
                         float(word["top"])
                         for word in words
                         if 250 <= float(word["x0"]) < 360
-                        and _fold(str(word["text"])).startswith("at")
+                        and _is_report_atendimento_header(str(word["text"]))
                     ),
                     default=None,
                 )
@@ -132,6 +132,11 @@ def _parse_report_competencia(text: str) -> date | None:
         _fold(text),
     )
     return date(int(match.group(2)), int(match.group(1)), 1) if match else None
+
+
+def _is_report_atendimento_header(text: str) -> bool:
+    folded = _fold(text)
+    return folded.startswith("at") or folded.endswith("endimento")
 
 
 def _cluster_words_by_top(
