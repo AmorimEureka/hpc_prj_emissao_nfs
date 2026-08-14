@@ -129,6 +129,26 @@ def test_parse_tramitando_report_uses_remessa_from_filename() -> None:
     assert rows[0]["valor"] == Decimal("98.70")
 
 
+def test_parse_tramitando_report_allows_competence_to_be_enriched() -> None:
+    text = """
+    NOME DO PACIENTE: JOAO DE SOUZA
+    GUIA: 9001
+    CONTA: 7001
+    ATENDIMENTO: 6001
+    VALOR: 98,70
+    """
+
+    rows = parse_tramitando_report_pages(
+        [(1, [], text)],
+        numero_processo="P335842/2026",
+        documento_id="27877736",
+        documento_nome="RELATORIO_19218_27877736.pdf",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["competencia"] is None
+
+
 def test_parse_saude_cogestao_joins_tables_across_pdf_pages() -> None:
     first = [
         "123",

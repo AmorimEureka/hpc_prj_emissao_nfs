@@ -282,7 +282,7 @@ def _tramitando_report_record(
     paciente = _optional(values.get("nome_paciente"))
     competencia = _parse_competencia(values.get("competencia", ""))
     valor = _parse_decimal(values.get("valor", ""))
-    if cd_remessa is None or paciente is None or competencia is None or valor is None:
+    if cd_remessa is None or paciente is None or valor is None:
         return None
     atendimento_digits = _digits(values.get("cd_atendimento", ""))
     record = {

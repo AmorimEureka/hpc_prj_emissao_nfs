@@ -297,7 +297,9 @@ def test_tramitando_reports_load_only_new_documents(
     monkeypatch.setattr(
         spu_extraction,
         "parse_tramitando_report_documents",
-        lambda *_args: [{"id_registro": "row-1"}],
+        lambda *_args: [
+            {"id_registro": "row-1", "competencia": date(2026, 7, 1)}
+        ],
     )
     monkeypatch.setattr(
         spu_extraction,
@@ -311,7 +313,9 @@ def test_tramitando_reports_load_only_new_documents(
     )
 
     assert summary.processos_processados == ("P335842/2026",)
-    assert loaded_rows == [{"id_registro": "row-1"}]
+    assert loaded_rows == [
+        {"id_registro": "row-1", "competencia": date(2026, 7, 1)}
+    ]
 
 
 def test_tramitando_process_query_preserves_regex_quantifier(

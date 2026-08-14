@@ -26,6 +26,7 @@ from nfs_fortaleza.spu_portal import (
     SpuDocument,
     SpuMaterializedTreeUnavailable,
     SpuPortalClient,
+    SpuPortalError,
     SpuProcessSummary,
     SpuSessionExpiredError,
     _clean_reason,
@@ -568,8 +569,44 @@ def extract_and_load_tramitando_reports(
                     if not documents:
                         already_loaded.append(process.numero_processo)
                         continue
-                    rows = parse_tramitando_report_documents(documents)
+                    rows: list[dict[str, Any]] = []
+                    documentos_com_erro: list[str] = []
+                    for document in documents:
+                        try:
+                            rows.extend(
+                                parse_tramitando_report_documents([document])
+                            )
+                        except SpuPortalError:
+                            LOGGER.exception(
+                                "SPU relatórios em tramitação: documento %s "
+                                "não pôde ser interpretado.",
+                                document.nome,
+                            )
+                            documentos_com_erro.append(document.nome)
+                    if not rows:
+                        raise SpuPortalError(
+                            "Nenhum documento do processo contém registros "
+                            "interpretáveis."
+                        )
                     _enrich_tramitando_report_rows(settings, rows)
+                    linhas_sem_competencia = sum(
+                        row.get("competencia") is None for row in rows
+                    )
+                    rows = [
+                        row for row in rows if row.get("competencia") is not None
+                    ]
+                    if linhas_sem_competencia:
+                        LOGGER.warning(
+                            "SPU relatórios em tramitação: %s registro(s) "
+                            "sem competência após o enriquecimento foram "
+                            "mantidos pendentes.",
+                            linhas_sem_competencia,
+                        )
+                    if not rows:
+                        raise SpuPortalError(
+                            "Os documentos não produziram registros com "
+                            "competência válida."
+                        )
                     pipeline.run(tramitando_report_resource(rows))
                     processed.append(process.numero_processo)
                     downloaded_files.extend(
@@ -585,6 +622,12 @@ def extract_and_load_tramitando_reports(
                         len(documents),
                         len(rows),
                     )
+                    if documentos_com_erro:
+                        LOGGER.warning(
+                            "SPU relatórios em tramitação: %s documento(s) "
+                            "do processo permaneceram pendentes.",
+                            len(documentos_com_erro),
+                        )
                 except SpuSessionExpiredError:
                     raise
                 except Exception as exc:
