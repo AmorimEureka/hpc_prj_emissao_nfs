@@ -11,6 +11,7 @@ from nfs_fortaleza.spu_extraction import (
     LoadedSpuProcess,
     SpuExtractionConfigurationError,
     SpuExtractionPayload,
+    _competencia_unica_remessa,
     _process_row,
     _split_nuexo_rows,
     extract_and_load_tramitando_reports,
@@ -33,6 +34,15 @@ def test_spu_postgres_table_names_use_processos_ipm_prefix() -> None:
     assert PROCESS_TABLE_NAME == "processos_ipm"
     assert HISTORY_TABLE_NAME == "processos_historico_ipm"
     assert COGESTAO_TABLE_NAME == "processos_ipm_saude_cogestao"
+
+
+def test_uses_oracle_competence_when_remessa_has_single_month() -> None:
+    candidates = [
+        (19258, 1, 10, "PACIENTE A", "1", date(2026, 7, 1), 10),
+        (19258, 2, 11, "PACIENTE B", "2", date(2026, 7, 1), 20),
+    ]
+
+    assert _competencia_unica_remessa(candidates) == date(2026, 7, 1)
     assert EMPENHO_TABLE_NAME == "processos_empenho_ipm"
     assert NOTA_FISCAL_TABLE_NAME == "processos_nota_fiscal_ipm"
     assert TRAMITANDO_REPORT_TABLE_NAME == "processos_relatorios_tramitando_ipm"
