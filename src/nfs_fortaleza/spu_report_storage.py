@@ -99,14 +99,6 @@ def ensure_process_report_table(cursor, schema: str) -> None:
         columns = sql.SQL(", ").join(
             sql.Identifier(column) for column in PROCESS_REPORT_COLUMNS
         )
-        updates = sql.SQL(", ").join(
-            sql.SQL("{} = EXCLUDED.{}").format(
-                sql.Identifier(column),
-                sql.Identifier(column),
-            )
-            for column in PROCESS_REPORT_COLUMNS
-            if column != "id_registro"
-        )
         cursor.execute(
             sql.SQL(
                 """
@@ -131,14 +123,19 @@ def ensure_process_report_table(cursor, schema: str) -> None:
                      = UPPER(BTRIM(rel.numero_processo))
                  WHERE UPPER(BTRIM(proc.status_processo))
                        IN ('FINALIZADO', 'TRAMITANDO')
-                ON CONFLICT (id_registro) DO UPDATE SET {}
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM {} AS atual
+                        WHERE atual.id_registro = rel.id_registro
+                   )
+                ON CONFLICT (id_registro) DO NOTHING
                 """
             ).format(
                 canonical,
                 columns,
                 sql.Identifier(schema, LEGACY_PROCESS_REPORT_TABLE_NAME),
                 sql.Identifier(schema, "processos_ipm"),
-                updates,
+                canonical,
             )
         )
     cursor.execute(
