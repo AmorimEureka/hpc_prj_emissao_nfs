@@ -98,13 +98,19 @@ with demonstrativos_legado as (
            item.cd_pro_fat_normalizado,
            item.cd_tuss_normalizado
        )
-     where not exists (
+     where (
+               nullif(btrim(d.numero_processo), '') is null
+               or item.numero_processo_normalizado
+                  = upper(btrim(d.numero_processo))
+           )
+       and (
+           not exists (
                select 1
                from contextos_protocolos contexto
                where contexto.numero_protocolo
                      = upper(btrim(d.numero_protocolo))
            )
-        or exists (
+           or exists (
                select 1
                from contextos_protocolos contexto
                where contexto.numero_protocolo
@@ -113,6 +119,7 @@ with demonstrativos_legado as (
                      = item.numero_processo_normalizado
                  and contexto.cd_remessa = item.cd_remessa
            )
+       )
 ), resumo_relatorio as (
     select
         id_registro,
@@ -178,7 +185,7 @@ with demonstrativos_legado as (
         cd_gru_pro,
         ds_gru_pro
     from {{ ref('int_ipm_relatorios_itens') }}
-), candidatos_fallback_brutos as (
+), candidatos_fallback_brutos_sem_contexto as (
     select 11 as prioridade,
            'relatorio_hpc_competencia_guia_servico_carteira'::text
                as criterio,
@@ -283,6 +290,35 @@ with demonstrativos_legado as (
             or i.nr_guia_normalizada = ''
             or i.nr_guia_normalizada = d.guia_normalizada
        )
+), candidatos_fallback_brutos as (
+    select candidato.*
+      from candidatos_fallback_brutos_sem_contexto candidato
+      join demonstrativos_fallback demonstrativo using (id_registro)
+     where (
+               nullif(btrim(demonstrativo.numero_processo), '') is null
+               or upper(btrim(candidato.numero_processo_resolvido))
+                  = upper(btrim(demonstrativo.numero_processo))
+           )
+       and (
+               exists (
+                   select 1
+                     from contextos_protocolos contexto
+                    where contexto.numero_protocolo
+                          = upper(btrim(demonstrativo.numero_protocolo))
+                      and contexto.numero_processo_normalizado
+                          = upper(btrim(candidato.numero_processo_resolvido))
+                      and contexto.cd_remessa = candidato.cd_remessa
+               )
+               or (
+                   nullif(btrim(demonstrativo.numero_processo), '') is not null
+                   and not exists (
+                       select 1
+                         from contextos_protocolos contexto
+                        where contexto.numero_protocolo
+                              = upper(btrim(demonstrativo.numero_protocolo))
+                   )
+               )
+           )
 ), resumo_fallback as (
     select
         id_registro,

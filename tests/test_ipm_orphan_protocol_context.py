@@ -68,6 +68,36 @@ def test_correspondencia_direta_respeita_contexto_do_protocolo():
     assert 'contexto.cd_remessa = item.cd_remessa' in trecho
 
 
+def test_correspondencia_direta_nao_contradiz_processo_do_demonstrativo():
+    modelo = (
+        MODELS / 'intermediate' / 'int_ipm_candidatos_sete_regras.sql'
+    ).read_text()
+
+    trecho = modelo.split('), candidatos_relatorio_brutos as (', 1)[1]
+    trecho = trecho.split('), resumo_relatorio as (', 1)[0]
+    assert "nullif(btrim(d.numero_processo), '') is null" in trecho
+    assert '= upper(btrim(d.numero_processo))' in trecho
+
+
+def test_fallback_exige_processo_informado_ou_contexto_canonico():
+    modelo = (
+        MODELS / 'intermediate' / 'int_ipm_candidatos_sete_regras.sql'
+    ).read_text()
+
+    assert 'candidatos_fallback_brutos_sem_contexto as (' in modelo
+    trecho = modelo.split('), candidatos_fallback_brutos as (', 1)[1]
+    trecho = trecho.split('), resumo_fallback as (', 1)[0]
+    assert 'join demonstrativos_fallback demonstrativo' in trecho
+    assert 'contexto.numero_processo_normalizado' in trecho
+    assert '= upper(btrim(candidato.numero_processo_resolvido))' in trecho
+    assert 'contexto.cd_remessa = candidato.cd_remessa' in trecho
+    assert (
+        "nullif(btrim(demonstrativo.numero_processo), '') is not null"
+        in trecho
+    )
+    assert 'not exists (' in trecho
+
+
 def test_pendencia_usa_processo_recuperado_da_remessa():
     modelo = (
         MODELS / 'marts' / 'glossas_nao_vinculadas_ipm.sql'
