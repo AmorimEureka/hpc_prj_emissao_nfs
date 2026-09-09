@@ -83,6 +83,11 @@ def test_materializacao_preserva_tratativas_e_e_idempotente():
 
     assert "WHERE NOT EXISTS" in registros
     assert "EXISTENTE.SN_ATIVO = 'TRUE'" in registros
+    assert (
+        "ON CONFLICT ON CONSTRAINT UQ_REGISTRO_GLOSA_CONCILIACAO_ITEM "
+        "DO UPDATE" in registros
+    )
+    assert "SN_ATIVO = 'TRUE'" in registros
     assert "ON CONFLICT (ID_REGISTRO) DO UPDATE" in rastreios
     assert "ORDER BY (ITEM.DT_RECURSO IS NULL) DESC" in rastreios
     assert "REGISTRO.QTD_RECURSADO IS NULL" in reconciliacao
