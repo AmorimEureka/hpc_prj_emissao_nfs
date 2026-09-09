@@ -95,6 +95,21 @@ def test_correspondencia_direta_nao_contradiz_processo_do_demonstrativo():
     assert '= upper(btrim(d.numero_processo))' in trecho
 
 
+def test_contexto_canonico_recupera_beneficiario_distorcido_por_guia_servico():
+    modelo = (
+        MODELS / 'intermediate' / 'int_ipm_candidatos_sete_regras.sql'
+    ).read_text()
+
+    trecho = modelo.split('), candidatos_relatorio_brutos as (', 1)[1]
+    trecho = trecho.split('), resumo_relatorio as (', 1)[0]
+    assert "else 'contexto_protocolo_guia_servico'" in trecho
+    assert 'contexto.numero_processo_normalizado' in trecho
+    assert '= item.numero_processo_normalizado' in trecho
+    assert 'contexto.cd_remessa = item.cd_remessa' in trecho
+    assert "item.nr_guia_normalizada <> ''" in trecho
+    assert 'item.cd_tuss_normalizado' in trecho
+
+
 def test_fallback_exige_processo_informado_ou_contexto_canonico():
     modelo = (
         MODELS / 'intermediate' / 'int_ipm_candidatos_sete_regras.sql'

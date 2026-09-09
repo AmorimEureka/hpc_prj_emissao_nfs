@@ -38,9 +38,34 @@ with demonstrativos_legado as (
     from {{ ref('int_ipm_processos_remessas') }}
 ), candidatos_relatorio_brutos as (
     select distinct
-           1 as prioridade,
-           'relatorio_hpc_guia_beneficiario_servico'::text
-               as criterio,
+           case
+               when ltrim(
+                       regexp_replace(
+                           coalesce(d.codigo_beneficiario, ''),
+                           '[^0-9]', '', 'g'
+                       ),
+                       '0'
+                    ) <> ''
+                and item.nr_carteira_normalizada = ltrim(
+                       regexp_replace(
+                           coalesce(d.codigo_beneficiario, ''),
+                           '[^0-9]', '', 'g'
+                       ),
+                       '0'
+                    )
+               then 1 else 2
+           end as prioridade,
+           case
+               when item.nr_carteira_normalizada = ltrim(
+                       regexp_replace(
+                           coalesce(d.codigo_beneficiario, ''),
+                           '[^0-9]', '', 'g'
+                       ),
+                       '0'
+                    )
+               then 'relatorio_hpc_guia_beneficiario_servico'
+               else 'contexto_protocolo_guia_servico'
+           end::text as criterio,
            d.id_registro,
            item.numero_processo as numero_processo_resolvido,
            item.cd_remessa,
@@ -76,23 +101,32 @@ with demonstrativos_legado as (
         on item.nr_guia_normalizada
            = upper(btrim(coalesce(d.numero_guia_senha, '')))
        and item.nr_guia_normalizada <> ''
-       and ltrim(
-               regexp_replace(
-                   coalesce(d.codigo_beneficiario, ''),
-                   '[^0-9]',
-                   '',
-                   'g'
-               ),
-               '0'
-           ) <> ''
-       and item.nr_carteira_normalizada = ltrim(
-               regexp_replace(
-                   coalesce(d.codigo_beneficiario, ''),
-                   '[^0-9]',
-                   '',
-                   'g'
-               ),
-               '0'
+       and (
+               (
+                   ltrim(
+                       regexp_replace(
+                           coalesce(d.codigo_beneficiario, ''),
+                           '[^0-9]', '', 'g'
+                       ),
+                       '0'
+                   ) <> ''
+                   and item.nr_carteira_normalizada = ltrim(
+                       regexp_replace(
+                           coalesce(d.codigo_beneficiario, ''),
+                           '[^0-9]', '', 'g'
+                       ),
+                       '0'
+                   )
+               )
+               or exists (
+                   select 1
+                     from contextos_protocolos contexto
+                    where contexto.numero_protocolo
+                          = upper(btrim(d.numero_protocolo))
+                      and contexto.numero_processo_normalizado
+                          = item.numero_processo_normalizado
+                      and contexto.cd_remessa = item.cd_remessa
+               )
            )
        and upper(btrim(coalesce(d.codigo_servico, ''))) in (
            item.cd_pro_fat_normalizado,
