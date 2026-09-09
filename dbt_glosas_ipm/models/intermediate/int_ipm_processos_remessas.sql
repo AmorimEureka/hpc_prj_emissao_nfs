@@ -60,8 +60,14 @@ with processos_associados as (
         competencia_producao,
         numero_protocolo,
         valor_protocolo
-    from candidatos_sem_processo
-    where quantidade_candidatos = 1
+from candidatos_sem_processo
+where quantidade_candidatos = 1
+  and not exists (
+      select 1
+      from processos_associados associado
+      where associado.numero_protocolo
+            = candidatos_sem_processo.numero_protocolo
+  )
 ), processos as (
     select * from processos_associados
     union

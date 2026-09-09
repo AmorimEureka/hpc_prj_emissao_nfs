@@ -16,6 +16,22 @@ def test_protocolo_sem_processo_recupera_contexto_por_remessa_unica():
     assert 'select * from processos_recuperados' in modelo
 
 
+def test_protocolo_sem_processo_nao_duplica_contexto_ja_associado():
+    modelo = (
+        MODELS / 'intermediate' / 'int_ipm_processos_remessas.sql'
+    ).read_text()
+
+    trecho = modelo.split('), processos_recuperados as (', 1)[1]
+    trecho = trecho.split('), processos as (', 1)[0]
+    assert 'not exists (' in trecho
+    assert 'from processos_associados associado' in trecho
+    assert (
+        'associado.numero_protocolo\n'
+        '            = candidatos_sem_processo.numero_protocolo'
+        in trecho
+    )
+
+
 def test_protocolo_orfao_prefere_relatorio_mais_recente_da_remessa():
     modelo = (
         MODELS / 'intermediate' / 'int_ipm_processos_remessas.sql'
