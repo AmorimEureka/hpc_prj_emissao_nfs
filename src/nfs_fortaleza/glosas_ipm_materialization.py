@@ -152,6 +152,33 @@ SELECT COALESCE(item.cd_paciente, 0), item.nm_paciente, item.cd_remessa,
           AND existente.motivo_glosa IS NOT DISTINCT FROM item.codigo_glosa
           AND existente.sn_ativo = 'true'
  )
+ON CONFLICT ON CONSTRAINT uq_registro_glosa_conciliacao_item DO UPDATE
+SET codigo_paciente = EXCLUDED.codigo_paciente,
+    nm_paciente = EXCLUDED.nm_paciente,
+    cd_atendimento = EXCLUDED.cd_atendimento,
+    cd_prestador = EXCLUDED.cd_prestador,
+    cd_convenio = EXCLUDED.cd_convenio,
+    tp_atendimento = EXCLUDED.tp_atendimento,
+    procedimento = EXCLUDED.procedimento,
+    convenio = EXCLUDED.convenio,
+    guia = EXCLUDED.guia,
+    prestador = EXCLUDED.prestador,
+    data_atendimento = EXCLUDED.data_atendimento,
+    valor = EXCLUDED.valor,
+    processo_controle_fatura_gab = EXCLUDED.processo_controle_fatura_gab,
+    data_glosa = EXCLUDED.data_glosa,
+    descricao_glosa = EXCLUDED.descricao_glosa,
+    qtd_registro = EXCLUDED.qtd_registro,
+    descricao_item = EXCLUDED.descricao_item,
+    data_alta = EXCLUDED.data_alta,
+    data_lancamento = EXCLUDED.data_lancamento,
+    cd_gru_pro = EXCLUDED.cd_gru_pro,
+    ds_gru_pro = EXCLUDED.ds_gru_pro,
+    cd_gru_fat = EXCLUDED.cd_gru_fat,
+    ds_gru_fat = EXCLUDED.ds_gru_fat,
+    cd_tuss = EXCLUDED.cd_tuss,
+    origem_registro = EXCLUDED.origem_registro,
+    sn_ativo = 'true'
 """
 
 
