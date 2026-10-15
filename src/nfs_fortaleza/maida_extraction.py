@@ -16,7 +16,6 @@ from nfs_fortaleza.maida_portal import (
     DownloadedMaidaDocument,
     MaidaCompetency,
     MaidaCompetencyResult,
-    MaidaDocument,
     MaidaPortalClient,
 )
 from nfs_fortaleza.maida_xlsx import MaidaSpreadsheetError, parse_maida_xlsx
@@ -172,7 +171,7 @@ def _enrich_glosa_records(
         guide = by_lot_id.get((document_lot_id, guide_number))
         if guide is None:
             guide = by_lot_number.get((lot_number, guide_number))
-        if guide is not None:
+        if guide is not None and guide.get("numero_carteira"):
             record["codigo_beneficiario"] = guide.get("numero_carteira")
     return records
 

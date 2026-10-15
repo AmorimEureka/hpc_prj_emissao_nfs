@@ -83,6 +83,21 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+# Applied only to the detailed lot layout. Keep legacy summary parsing and
+# existing merge identities unchanged (notably its "Valor apurado" column).
+LOT_FIELD_ALIASES = {
+    "identificador do lote": "numero_lote",
+    "numero da guia da operadora": "numero_guia_senha",
+    "data de inicio da execucao": "data_realizacao",
+    "codigo": "codigo_servico",
+    "valor total apresentado": "valor_processado",
+    "valor apurado": "valor_liberado",
+    "motivo da glosa": "codigo_glosa",
+    "nome do beneficiario": "nome_beneficiario",
+    "numero da carteira do beneficiario": "codigo_beneficiario",
+}
+
+
 class MaidaSpreadsheetError(ValueError):
     """Raised when a Maida workbook does not have a supported layout."""
 
@@ -138,10 +153,13 @@ def _find_header(
     for row_number, row in enumerate(rows, start=1):
         if row_number > HEADER_SEARCH_LIMIT:
             break
+        normalized_row = [_normalize_header(value) for value in row]
+        row_aliases = aliases
+        if {"identificador do lote", "motivo da glosa"}.issubset(normalized_row):
+            row_aliases = {**aliases, **LOT_FIELD_ALIASES}
         columns: dict[str, int] = {}
-        for index, value in enumerate(row):
-            normalized = _normalize_header(value)
-            field = aliases.get(normalized)
+        for index, normalized in enumerate(normalized_row):
+            field = row_aliases.get(normalized)
             if field and field not in columns:
                 columns[field] = index
         if "valor_glosa" in columns and "codigo_glosa" in columns:

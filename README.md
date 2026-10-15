@@ -1226,3 +1226,22 @@ Os testes cobrem payloads das DAGs, regras de elegibilidade, proteção contra
 reemissão, leitura da planilha, ações JSF, consulta por número, filtros da
 extração e normalização do demonstrativo IPM, incrementalidade do SPU,
 tabelas multipágina e campos de EMPENHO/NFS-e.
+
+
+### Maida: demonstrativos sem planilha no Resumo
+
+A `extracao_glosas_maida` prefere os XLSX do Resumo. Na ausência deles,
+processa os demonstrativos dos lotes com glosas não recursadas e recursadas,
+percorrendo todas as páginas. O formato `DemonstrativoAnaliseDeContas` é
+reconhecido por `Valor glosado` e `Motivo da glosa`; a guia utilizada é a da
+operadora. São preservados lote, código, carteira, data de execução,
+quantidade e valores apresentado, apurado e glosado. Linhas sem glosa
+continuam excluídas. A carga usa o merge existente em
+`demonstrativo_conta_ipm` e aciona `materializacao_glosas_ipm`, que alimenta
+o Receita Certa. Não há nova tabela nem migration.
+
+Se os lotes estiverem indisponíveis e não houver XLSX no Resumo, a extração
+falha para permitir retry, em vez de concluir uma carga incompleta.
+Após implantar, reprocessar as competências anteriormente ignoradas com
+`{"competencias": ["08/2026", "09/2026", "10/2026"]}` na DAG e conferir a
+materialização antes de validar os cards no Receita Certa.
