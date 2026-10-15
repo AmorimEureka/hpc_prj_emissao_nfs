@@ -64,6 +64,36 @@ SELECT h.* FROM itens_hpc h
  WHERE (__ESCOPO_ITENS__)
 """
 
+BRASINDICE_SQL = """
+SELECT MIN(TRIM(cd_pro_fat)) AS cd_pro_fat,
+       LTRIM(TRIM(cd_tiss), '0') AS cd_tiss
+  FROM dbamv.imp_bra
+ WHERE REGEXP_LIKE(TRIM(cd_tiss), '^[0-9]+$')
+   AND TRIM(cd_pro_fat) IS NOT NULL
+ GROUP BY LTRIM(TRIM(cd_tiss), '0')
+HAVING COUNT(DISTINCT TRIM(cd_pro_fat)) = 1
+   AND LENGTH(LTRIM(TRIM(cd_tiss), '0')) > 0
+"""
+
+
+def _carregar_brasindice(oracle, destino):
+    destino.execute("""
+        CREATE TABLE IF NOT EXISTS api_prontocardio_staging.ipm_brasindice_oracle (
+            cd_pro_fat TEXT NOT NULL, cd_tiss TEXT PRIMARY KEY
+        )
+    """)
+    destino.execute("TRUNCATE api_prontocardio_staging.ipm_brasindice_oracle")
+    origem = oracle.cursor()
+    try:
+        origem.execute(BRASINDICE_SQL)
+        for lote in _linhas(origem):
+            execute_values(destino,
+                "INSERT INTO api_prontocardio_staging.ipm_brasindice_oracle "
+                "(cd_pro_fat, cd_tiss) VALUES %s", lote)
+    finally:
+        origem.close()
+
+
 CONVENIOS_BASE = (10,)
 TAMANHO_LOTE_GUIAS = 500
 
@@ -249,5 +279,6 @@ def carregar_hpc_intermediaria(oracle, postgres) -> dict[str, int]:
             CREATE INDEX IF NOT EXISTS ix_ipm_itens_oracle_remessa
                 ON api_prontocardio_staging.ipm_itens_oracle (cd_remessa)
         """)
+        _carregar_brasindice(oracle, destino)
         postgres.commit()
         return totais

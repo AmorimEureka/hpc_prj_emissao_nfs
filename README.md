@@ -1257,3 +1257,15 @@ Outros convênios mantêm o comportamento anterior. Não há associação por no
 descrição de medicamento ou valor do item: o procedimento ainda deve coincidir.
 Após implantação, executar `materializacao_glosas_ipm` para atualizar os vínculos
 existentes, preservando rastreabilidade e tratativas.
+
+
+### Códigos Brasíndice dos demonstrativos Maida
+
+A carga intermediária mantém `ipm_brasindice_oracle`, com equivalências
+numéricas únicas de `DBAMV.IMP_BRA.CD_TISS` para `CD_PRO_FAT`. Códigos que
+apontam para mais de um procedimento são excluídos. Na associação Maida do
+ISSEC (46), esse cadastro complementa CD_PRO_FAT/CD_TUSS sem substituir os
+códigos originais e sem multiplicar lançamentos. Guia, carteira e unicidade
+do contexto continuam obrigatórias conforme as regras existentes.
+A tabela é criada/atualizada na transação da carga HPC antes do dbt;
+implantar e executar a DAG completa `materializacao_glosas_ipm`.

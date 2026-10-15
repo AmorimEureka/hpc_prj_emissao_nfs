@@ -248,3 +248,38 @@ def test_item_guide_is_used_before_scope_filter_without_mixing_accounts():
     assert [(r['cd_reg'],r['nr_guia']) for r in rows] == [(420579,'567350'),(420580,'568383'),(420581,'original')]
     assert rows[0]['vl_total_conta'] == 580.95
     db.close()
+
+
+def test_brasindice_requires_unique_procedure_and_deduplicates_catalog_rows():
+    import re
+    import sqlite3
+    from nfs_fortaleza.glosas_ipm_stage import BRASINDICE_SQL
+    db = sqlite3.connect(':memory:')
+    db.create_function('REGEXP_LIKE', 2, lambda value, pattern: bool(value and re.fullmatch(pattern, value)))
+    db.execute("ATTACH DATABASE ':memory:' AS dbamv")
+    db.execute('CREATE TABLE dbamv.imp_bra (cd_pro_fat TEXT,cd_tiss TEXT)')
+    db.executemany('INSERT INTO dbamv.imp_bra VALUES (?,?)', [
+        ('90425405','0000078358'), ('90425405','0000078358'),
+        ('A','00123'), ('B','123'), ('C','invalid'), ('D','000'),
+    ])
+    assert db.execute(BRASINDICE_SQL).fetchall() == [('90425405','78358')]
+    db.close()
+
+
+def test_brasindice_fallback_matches_only_same_procedure_and_issec():
+    import sqlite3
+    from pathlib import Path
+    sql = (Path(__file__).parents[1] / 'dbt_glosas_ipm/models/intermediate/int_ipm_candidatos_sete_regras.sql').read_text()
+    clause = sql.split('or (i.cd_convenio = 46 and exists (', 1)[1].split(')))', 1)[0]
+    clause = clause.replace("{{ source('oracle_stage', 'ipm_brasindice_oracle') }}", 'mapping')
+    db = sqlite3.connect(':memory:')
+    db.execute('CREATE TABLE mapping (cd_tiss TEXT, cd_pro_fat TEXT)')
+    db.execute("INSERT INTO mapping VALUES ('78358','90425405')")
+    query = ('SELECT i.cd_convenio = 46 AND EXISTS (' + clause +
+        ') FROM (SELECT ? cd_convenio, ? cd_pro_fat_normalizado) i '
+        'CROSS JOIN (SELECT ? servico_normalizado) d')
+    assert db.execute(query, (46,'90425405','78358')).fetchone()[0] == 1
+    assert db.execute(query, (10,'90425405','78358')).fetchone()[0] == 0
+    assert db.execute(query, (46,'999','78358')).fetchone()[0] == 0
+    assert db.execute(query, (46,'90425405','999')).fetchone()[0] == 0
+    db.close()

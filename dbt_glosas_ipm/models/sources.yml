@@ -20,3 +20,4 @@ sources:
     tables:
       - name: ipm_remessas_oracle
       - name: ipm_itens_oracle
+      - name: ipm_brasindice_oracle
