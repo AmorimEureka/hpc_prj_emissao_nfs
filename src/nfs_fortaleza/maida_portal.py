@@ -241,6 +241,7 @@ class MaidaPortalClient:
     ) -> MaidaCompetencyResult:
         provider_id = self.resolve_provider_id()
         summary_documents = tuple(self._summary_documents(competency))
+        require_lots = not any(document.is_xlsx for document in summary_documents)
         lots: list[dict[str, Any]] = []
         guides: list[dict[str, Any]] = []
         lot_documents: list[MaidaDocument] = []
@@ -248,7 +249,9 @@ class MaidaPortalClient:
             ("lotesGlosasNaoRecursadas", "lote_glosa_nao_recursado"),
             ("lotesGlosasRecursadas", "lote_glosa_recursado"),
         ):
-            for lot in self._analyzed_lots(competency, provider_id, lot_filter):
+            for lot in self._analyzed_lots(
+                competency, provider_id, lot_filter, required=require_lots,
+            ):
                 details = self._lot_details(lot)
                 metadata = _lot_metadata(lot, details, source)
                 lots.append(metadata)
@@ -371,6 +374,8 @@ class MaidaPortalClient:
         competency: MaidaCompetency,
         provider_id: str,
         selected_filter: str,
+        *,
+        required: bool = False,
     ) -> Iterator[dict[str, Any]]:
         page = 0
         while True:
@@ -397,6 +402,11 @@ class MaidaPortalClient:
             except HTTPError as exc:
                 status = getattr(exc.response, "status_code", 0)
                 if 500 <= status < 600:
+                    if required:
+                        raise MaidaPortalError(
+                            f"Sem planilha no Resumo e lotes indisponiveis "
+                            f"em {competency.label}; repetir a extracao."
+                        ) from exc
                     LOGGER.warning(
                         "Lotes Maida temporariamente indisponiveis: "
                         "competencia=%s filtro=%s pagina=%s HTTP=%s. "

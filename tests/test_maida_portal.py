@@ -258,3 +258,26 @@ def test_server_error_in_lots_is_treated_as_temporarily_unavailable(
 
     assert lots == []
     assert "temporariamente indisponiveis" in caplog.text
+
+
+def test_missing_summary_requires_successful_lot_listing(tmp_path):
+    from nfs_fortaleza.maida_portal import MaidaPortalError
+    settings = MaidaSettings(login="test", password="test", database_url="postgresql://example")
+    client = MaidaPortalClient(settings, downloads_dir=tmp_path)
+    client.session = _UnavailableLotsSession()
+    with pytest.raises(MaidaPortalError, match="repetir a extracao"):
+        list(client._analyzed_lots(MaidaCompetency(2026, 9), "provider", "lotesGlosasRecursadas", required=True))
+
+
+def test_fallback_traverses_all_lot_pages(tmp_path):
+    class Pages(_Session):
+        def get(self, url, **kwargs):
+            if url.endswith('/lotes-analisados/visao-prestador'):
+                self.calls.append(('GET', url, kwargs))
+                page = kwargs['params']['page']
+                return _Response({'content': [{'loteId': str(page), 'tipoLote': 'COBRANCA'}], 'totalPages': 3})
+            return super().get(url, **kwargs)
+    client = MaidaPortalClient(MaidaSettings(login='test', password='test', database_url='postgresql://example'), downloads_dir=tmp_path)
+    client.session = Pages()
+    lots = list(client._analyzed_lots(MaidaCompetency(2026, 9), 'provider', 'lotesGlosasNaoRecursadas', required=True))
+    assert [lot['loteId'] for lot in lots] == ['0', '1', '2']

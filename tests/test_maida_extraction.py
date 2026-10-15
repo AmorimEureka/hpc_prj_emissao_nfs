@@ -97,3 +97,13 @@ def test_enriches_record_with_card_from_same_lot_and_guide(tmp_path: Path) -> No
     enriched = _enrich_glosa_records(records, downloaded, result)
 
     assert enriched[0]["codigo_beneficiario"] == "000123456"
+
+
+def test_missing_guide_card_preserves_card_from_lot_spreadsheet(tmp_path):
+    competency = MaidaCompetency(2026, 9)
+    document = MaidaDocument(competency, 'lote_glosa_nao_recursado', 'doc', 'lote.xlsx', '/lote.xlsx', lot_id='15329')
+    downloaded = DownloadedMaidaDocument(document, tmp_path / 'lote.xlsx')
+    result = MaidaCompetencyResult(competency, (), (document,), (),
+        guides=({'lote_id': '15329', 'numero_guia': '566985', 'numero_carteira': None},))
+    records = [{'numero_guia_senha': '566985', 'numero_lote': '31662', 'codigo_beneficiario': '001234'}]
+    assert _enrich_glosa_records(records, downloaded, result)[0]['codigo_beneficiario'] == '001234'
