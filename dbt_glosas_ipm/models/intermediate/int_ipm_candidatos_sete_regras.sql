@@ -39,7 +39,7 @@ with demonstrativos_maida as (
                ),
                '0'
            ) = d.guia_normalizada
-       and d.servico_normalizado in (
+       and (d.servico_normalizado in (
            ltrim(
                regexp_replace(
                    coalesce(i.cd_pro_fat_normalizado, ''),
@@ -54,7 +54,12 @@ with demonstrativos_maida as (
                ),
                '0'
            )
-       )
+       ) or (i.cd_convenio = 46 and exists (
+           select 1
+             from {{ source('oracle_stage', 'ipm_brasindice_oracle') }} b
+            where b.cd_tiss = d.servico_normalizado
+              and b.cd_pro_fat = i.cd_pro_fat_normalizado
+       )))
        and (
            d.carteira_normalizada = ''
            or i.nr_carteira_normalizada = d.carteira_normalizada
