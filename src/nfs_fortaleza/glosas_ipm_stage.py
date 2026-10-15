@@ -31,24 +31,37 @@ SELECT cd_remessa, nm_convenio, cnpj_convenio,
 """
 
 ITENS_SQL = """
+WITH itens_hpc AS (
 SELECT h.cd_remessa, h.cd_reg, h.cd_lancamento, h.cd_atendimento,
        h.cd_paciente, h.nm_paciente, h.cd_prestador, h.nm_prestador,
        h.cd_convenio, h.cnpj_convenio, h.nm_convenio, h.tp_atendimento,
-       h.nr_guia, h.nr_carteira, h.cd_pro_fat, h.cd_tuss, h.descricao,
+       COALESCE(gi.nr_guia, h.nr_guia) AS nr_guia,
+       h.nr_carteira, h.cd_pro_fat, h.cd_tuss, h.descricao,
        h.dt_atendimento, h.dt_alta,
        h.dt_competencia, h.dt_lancamento, h.qt_lancamento,
        h.vl_total_conta, h.cd_gru_fat, h.ds_gru_fat,
        g.cd_gru_pro, g.ds_gru_pro
   FROM dbamv.hpc_v_conta_atendimento h
+  LEFT JOIN dbamv.itreg_amb ia
+    ON h.cd_convenio = 46 AND h.tp_atendimento <> 'Internação'
+   AND ia.cd_reg_amb = h.cd_reg AND ia.cd_lancamento = h.cd_lancamento
+   AND ia.cd_atendimento = h.cd_atendimento AND ia.cd_pro_fat = h.cd_pro_fat
+  LEFT JOIN dbamv.itreg_fat it
+    ON h.cd_convenio = 46 AND h.tp_atendimento = 'Internação'
+   AND it.cd_reg_fat = h.cd_reg AND it.cd_lancamento = h.cd_lancamento
+   AND it.cd_pro_fat = h.cd_pro_fat
+  LEFT JOIN dbamv.guia gi ON gi.cd_guia = COALESCE(ia.cd_guia, it.cd_guia)
   LEFT JOIN dbamv.pro_fat p ON p.cd_pro_fat = h.cd_pro_fat
   LEFT JOIN dbamv.gru_pro g ON g.cd_gru_pro = p.cd_gru_pro
  WHERE h.cd_remessa IS NOT NULL
-   AND (__ESCOPO_ITENS__)
    AND (
        (h.dt_competencia >= :data_inicial AND h.dt_competencia < :data_final)
        OR (h.dt_lancamento >= :data_inicial AND h.dt_lancamento < :data_final)
        OR (h.dt_atendimento >= :data_inicial AND h.dt_atendimento < :data_final)
    )
+)
+SELECT h.* FROM itens_hpc h
+ WHERE (__ESCOPO_ITENS__)
 """
 
 CONVENIOS_BASE = (10,)
