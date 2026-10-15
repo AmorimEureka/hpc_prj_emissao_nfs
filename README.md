@@ -1245,3 +1245,15 @@ falha para permitir retry, em vez de concluir uma carga incompleta.
 Após implantar, reprocessar as competências anteriormente ignoradas com
 `{"competencias": ["08/2026", "09/2026", "10/2026"]}` na DAG e conferir a
 materialização antes de validar os cards no Receita Certa.
+
+
+### Guia do lançamento ISSEC na materialização
+
+A carga intermediária prefere a guia do próprio lançamento para o ISSEC,
+identificada por conta, lançamento, atendimento e procedimento no ambulatório
+ou conta/lançamento/procedimento na internação. Na ausência dela, conserva a
+guia da view HPC. O filtro das guias Maida é aplicado depois dessa resolução.
+Outros convênios mantêm o comportamento anterior. Não há associação por nome,
+descrição de medicamento ou valor do item: o procedimento ainda deve coincidir.
+Após implantação, executar `materializacao_glosas_ipm` para atualizar os vínculos
+existentes, preservando rastreabilidade e tratativas.

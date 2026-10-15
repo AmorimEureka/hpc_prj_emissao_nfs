@@ -211,3 +211,40 @@ def test_carga_limita_outros_convenios_as_guias_maida():
     assert consulta_itens.parametros["guia_0"] == "412690"
     assert "h.nr_guia IN (:guia_0)" in consulta_itens.consulta
     assert all("__ESCOPO" not in cursor.consulta for cursor in consultas_carga)
+
+
+def test_item_guide_is_used_before_scope_filter_without_mixing_accounts():
+    import sqlite3
+    db = sqlite3.connect(':memory:')
+    db.row_factory = sqlite3.Row
+    db.execute("ATTACH DATABASE ':memory:' AS dbamv")
+    fields = ['cd_remessa', 'cd_reg', 'cd_lancamento', 'cd_atendimento',
+        'cd_paciente', 'nm_paciente', 'cd_prestador', 'nm_prestador',
+        'cd_convenio', 'cnpj_convenio', 'nm_convenio', 'tp_atendimento',
+        'nr_guia', 'nr_carteira', 'cd_pro_fat', 'cd_tuss', 'descricao',
+        'dt_atendimento', 'dt_alta', 'dt_competencia', 'dt_lancamento',
+        'qt_lancamento', 'vl_total_conta', 'cd_gru_fat', 'ds_gru_fat']
+    db.execute('CREATE TABLE dbamv.hpc_v_conta_atendimento (' + ','.join(fields) + ')')
+    db.execute('CREATE TABLE dbamv.itreg_amb (cd_reg_amb,cd_lancamento,cd_atendimento,cd_pro_fat,cd_guia)')
+    db.execute('CREATE TABLE dbamv.itreg_fat (cd_reg_fat,cd_lancamento,cd_pro_fat,cd_guia)')
+    db.execute('CREATE TABLE dbamv.guia (cd_guia,nr_guia)')
+    db.execute('CREATE TABLE dbamv.pro_fat (cd_pro_fat,cd_gru_pro)')
+    db.execute('CREATE TABLE dbamv.gru_pro (cd_gru_pro,ds_gru_pro)')
+    def add(account, kind, guide, convenio=46):
+        row = dict(cd_remessa=19877,cd_reg=account,cd_lancamento=11,
+            cd_atendimento=344949,cd_convenio=convenio,tp_atendimento=kind,
+            nr_guia=guide,cd_pro_fat='41001230',dt_competencia='2026-08-01',
+            vl_total_conta=580.95)
+        db.execute('INSERT INTO dbamv.hpc_v_conta_atendimento VALUES (' + ','.join('?' for _ in fields) + ')', [row.get(f) for f in fields])
+    add(420579, 'Externo', '567274')
+    add(420579, 'Internação', 'outra')
+    add(420580, 'Externo', '568383')
+    add(420581, 'Externo', 'original', 10)
+    db.execute("INSERT INTO dbamv.itreg_amb VALUES (420579,11,344949,'41001230',664858)")
+    db.execute("INSERT INTO dbamv.itreg_amb VALUES (420581,11,344949,'41001230',664858)")
+    db.execute("INSERT INTO dbamv.guia VALUES (664858,'567350')")
+    sql,params = _consulta_com_escopo(ITENS_SQL, ('567350','568383'))
+    rows = list(db.execute(sql,{**params,'data_inicial':'2026-08-01','data_final':'2026-09-01'}))
+    assert [(r['cd_reg'],r['nr_guia']) for r in rows] == [(420579,'567350'),(420580,'568383'),(420581,'original')]
+    assert rows[0]['vl_total_conta'] == 580.95
+    db.close()
