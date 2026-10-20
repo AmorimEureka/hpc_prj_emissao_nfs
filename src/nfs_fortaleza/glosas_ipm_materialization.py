@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from nfs_fortaleza.glosas_ipm_context import ENRIQUECER_CONTEXTO_MAIDA_SQL
+
 
 RECONCILIAR_REGISTROS_SQL = """
 WITH fontes_atuais AS (
@@ -465,9 +467,20 @@ WITH pares_brutos AS (
       JOIN api_prontocardio.registros_glosa AS legado
         ON legado.id <> destino.id
        AND legado.sn_ativo = 'true'
-       AND UPPER(BTRIM(legado.processo_controle_fatura_gab)) = UPPER(
-           'MAIDA-' || COALESCE(NULLIF(BTRIM(demo.numero_lote), ''),
-                                'SEM-LOTE')
+       AND (
+           UPPER(BTRIM(legado.processo_controle_fatura_gab)) = UPPER(
+               'MAIDA-' || COALESCE(NULLIF(BTRIM(demo.numero_lote), ''),
+                                    'SEM-LOTE')
+           )
+           OR (
+               -- Context-only enrichment retains the synthetic launch.
+               -- A later exact procedure match can still migrate treatment.
+               legado.cd_lancamento >= 1000000000
+               AND legado.origem_registro = 'triagem'
+               AND BTRIM(legado.numero_lote) = BTRIM(demo.numero_lote)
+               AND BTRIM(legado.processo_controle_fatura_gab) =
+                   BTRIM(demo.numero_lote)
+           )
        )
        AND UPPER(BTRIM(legado.guia)) =
            UPPER(BTRIM(COALESCE(demo.numero_guia_senha, '-')))
@@ -577,6 +590,8 @@ def materializar_registros_glosa(postgres) -> dict[str, int]:
             registros_maida_pendentes = max(cursor.rowcount, 0)
             cursor.execute(MATERIALIZAR_RASTREIO_MAIDA_PENDENTE_SQL)
             rastreios_maida_pendentes = max(cursor.rowcount, 0)
+            cursor.execute(ENRIQUECER_CONTEXTO_MAIDA_SQL)
+            contextos_maida = max(cursor.rowcount, 0)
         postgres.commit()
     except Exception:
         postgres.rollback()
@@ -590,4 +605,5 @@ def materializar_registros_glosa(postgres) -> dict[str, int]:
         "registros_maida_consolidados": registros_maida_consolidados,
         "registros_maida_pendentes": registros_maida_pendentes,
         "rastreios_maida_pendentes": rastreios_maida_pendentes,
+        "contextos_maida_enriquecidos": contextos_maida,
     }

@@ -1,3 +1,5 @@
+from nfs_fortaleza.glosas_ipm_context import ENRIQUECER_CONTEXTO_MAIDA_SQL
+
 from pathlib import Path
 
 import pytest
@@ -33,7 +35,7 @@ class CursorFake:
 
 
 class PostgresFake:
-    def __init__(self, rowcounts=(2, 7, 11, 3, 5, 17, 13, 13)):
+    def __init__(self, rowcounts=(2, 7, 11, 3, 5, 17, 13, 13, 5)):
         self.cursor_fake = CursorFake(rowcounts)
         self.commits = 0
         self.rollbacks = 0
@@ -62,6 +64,7 @@ def test_materializa_registros_e_rastreios_em_uma_transacao():
         CONSOLIDAR_REGISTROS_MAIDA_ENRIQUECIDOS_SQL,
         MATERIALIZAR_MAIDA_PENDENTE_SQL,
         MATERIALIZAR_RASTREIO_MAIDA_PENDENTE_SQL,
+        ENRIQUECER_CONTEXTO_MAIDA_SQL,
     ]
     assert resultado == {
         "registros_desativados": 2,
@@ -72,6 +75,7 @@ def test_materializa_registros_e_rastreios_em_uma_transacao():
         "registros_maida_consolidados": 17,
         "registros_maida_pendentes": 13,
         "rastreios_maida_pendentes": 13,
+        "contextos_maida_enriquecidos": 5,
     }
     assert postgres.commits == 1
     assert postgres.rollbacks == 0
