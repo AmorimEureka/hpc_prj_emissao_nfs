@@ -255,7 +255,7 @@ Uma execução manual pode limitar o período com `dag_run.conf`:
 
 ## Processos do portal ISSEC — `extracao_processos_portal_issec`
 
-A DAG consulta diariamente, às 05:00 de Fortaleza, o relatório de processos do
+A DAG consulta em dias úteis, às 08:00 de Fortaleza, o relatório de processos do
 portal do credenciado ISSEC (Oracle APEX/ORDS) e grava os dados de forma
 idempotente em `raw_issec_portal.processos`, chave `processo`. Meses ausentes
 desde janeiro de 2026 são processados e os três meses mais recentes são sempre
@@ -264,6 +264,14 @@ reconsultados, para capturar publicações tardias.
 O Follow-Up de Glosas da `api_prontocardio` lê essa tabela e vincula o processo
 à remessa por valor total e competência. A Maida não informa esse número, por
 isso `extracao_glosas_maida` não substitui esta DAG.
+
+O login do portal exige um captcha de imagem, resolvido por uma pessoa. A DAG
+abre o portal com usuário e senha preenchidos no mesmo desktop remoto do SPU e o
+Receita Certa exibe o modal a quem tem acesso à automação. Depois do clique em
+**Acessar**, a extração segue sozinha com a sessão criada. Sem resolução em
+`ISSEC_AUTH_TIMEOUT_SECONDS` (30 minutos), a tarefa falha sem nova tentativa e
+os dados continuam como estavam. A tarefa usa o pool `nfse_portal` para nunca
+disputar o desktop com um desafio do SPU.
 
 Credenciais reais devem ficar no `.env` não versionado:
 
@@ -275,7 +283,8 @@ ISSEC_POSTGRES_CONN_ID=postgres_prontocardio
 ```
 
 Código e testes: `dags/extracao_processos_portal_issec.py`,
-`src/nfs_fortaleza/issec_portal.py` e `tests/test_issec_portal.py`.
+`src/nfs_fortaleza/issec_portal.py`, `src/nfs_fortaleza/issec_auth.py`,
+`tests/test_issec_portal.py` e `tests/test_issec_auth.py`.
 
 ## Emissão de NFS-e — `emissao_nfse`
 

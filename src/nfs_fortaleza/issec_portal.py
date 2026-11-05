@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from html.parser import HTMLParser
+from typing import Any, Callable
 from urllib.parse import urljoin
 
 import requests
@@ -271,32 +272,22 @@ class IssecPortalClient:
         response.raise_for_status()
         return response
 
-    def login(self) -> None:
-        login_url = urljoin(self.base_url, LOGIN_PATH)
-        login_page = parse_html(self._get(LOGIN_PATH).text)
-        response = self._submit(
-            login_page,
-            "LOGIN",
-            [
-                ("P9999_USERNAME", self.username),
-                ("P9999_PASSWORD", self.password),
-                ("P9999_REMEMBER", "N"),
-            ],
-            login_url,
-        )
-        redirect = response.json().get("redirectURL", "")
-        if "notification_msg" in redirect or "/home" not in redirect:
-            raise IssecPortalError("Autenticação recusada pelo portal ISSEC.")
-        home = self._get(redirect)
-        self.session_id = parse_html(home.text).values_by_id.get(
-            "pInstance", ""
-        )
-        if not self.session_id:
+    def adopt_session(self, cookies: list[dict], session_id: str) -> None:
+        """Recebe a sessão criada pelo login humano no navegador."""
+        if not session_id:
             raise IssecPortalError("Sessão APEX não foi criada.")
+        for cookie in cookies:
+            self.session.cookies.set(
+                cookie["name"],
+                cookie["value"],
+                domain=cookie.get("domain", ""),
+                path=cookie.get("path", "/"),
+            )
+        self.session_id = session_id
 
     def _report_page(self, month: date) -> tuple[str, HtmlPage, str]:
         if not self.session_id:
-            self.login()
+            raise IssecPortalError("Sessão do portal ISSEC não autenticada.")
         consulta_path = f"{CONSULTA_PATH}?session={self.session_id}"
         consulta_url = urljoin(self.base_url, consulta_path)
         page = parse_html(self._get(consulta_path).text)
@@ -406,16 +397,8 @@ class IssecPortalClient:
 
 
 @dlt.source(name="portal_issec")
-def portal_issec_source(
-    *,
-    username: str,
-    password: str,
-    months: list[date],
-    base_url: str = DEFAULT_BASE_URL,
-    timeout: int = 30,
-    max_workers: int = 4,
-):
-    """Fonte dlt que encadeia login, pesquisa, paginação e detalhe APEX."""
+def portal_issec_source(*, client: Any, months: list[date]):
+    """Fonte dlt que percorre os meses com uma sessão já autenticada."""
 
     @dlt.resource(
         name="processos",
@@ -423,14 +406,6 @@ def portal_issec_source(
         write_disposition="merge",
     )
     def processos():
-        client = IssecPortalClient(
-            username=username,
-            password=password,
-            base_url=base_url,
-            timeout=timeout,
-            max_workers=max_workers,
-        )
-        client.login()
         for month in months:
             yield from client.scrape_month(month)
 
@@ -443,6 +418,7 @@ def extract_and_load_processos(
     password: str,
     database_url: str,
     extracted_months: set[date],
+    authenticate: Callable[[IssecPortalClient], None],
     today: date | None = None,
     base_url: str = DEFAULT_BASE_URL,
     timeout: int = 30,
@@ -451,26 +427,26 @@ def extract_and_load_processos(
     """Carrega os meses pendentes em ``raw_issec_portal.processos``.
 
     A API lê essa tabela pelo nome; pipeline e dataset não podem mudar sem
-    migrar também o consumidor e o estado dlt já gravado.
+    migrar também o consumidor e o estado dlt já gravado. O login só é pedido
+    quando há mês a consultar.
     """
 
     months = select_months_to_scrape(today or date.today(), extracted_months)
     if not months:
         return {"competencias": []}
+    client = IssecPortalClient(
+        username=username,
+        password=password,
+        base_url=base_url,
+        timeout=timeout,
+        max_workers=max_workers,
+    )
+    authenticate(client)
     os.environ["DESTINATION__POSTGRES__CREDENTIALS"] = database_url
     pipeline = dlt.pipeline(
         pipeline_name="portal_issec_processos",
         dataset_name="raw_issec_portal",
         destination="postgres",
     )
-    pipeline.run(
-        portal_issec_source(
-            username=username,
-            password=password,
-            months=months,
-            base_url=base_url,
-            timeout=timeout,
-            max_workers=max_workers,
-        )
-    )
+    pipeline.run(portal_issec_source(client=client, months=months))
     return {"competencias": [month.strftime("%m/%Y") for month in months]}
