@@ -84,8 +84,7 @@ def authenticate_with_human_captcha(
             urljoin(client.base_url, LOGIN_PATH),
             wait_until="domcontentloaded",
         )
-        page.fill(USERNAME_SELECTOR, client.username)
-        page.fill(PASSWORD_SELECTOR, client.password)
+        _prefill_login_once(page, client)
         challenge_id = _publish_recaptcha_challenge(
             timeout_seconds=timeout_seconds,
             metadata=challenge_metadata,
@@ -97,6 +96,7 @@ def authenticate_with_human_captcha(
         )
         session_id = _wait_for_human_login(
             page,
+            client=client,
             timeout_seconds=timeout_seconds,
         )
         client.adopt_session(context.cookies(), session_id)
@@ -122,7 +122,30 @@ def authenticate_with_human_captcha(
             playwright.stop()
 
 
-def _wait_for_human_login(page: Page, *, timeout_seconds: float) -> str:
+def _prefill_login_once(page: Page, client: IssecPortalClient) -> None:
+    """Preenche usuário e senha uma vez a cada carregamento do login.
+
+    O portal limpa os campos após uma recusa. O marcador some com a navegação,
+    então uma edição feita pelo usuário na mesma página nunca é sobrescrita.
+    """
+    if not page.locator(USERNAME_SELECTOR).count():
+        return
+    already_filled = page.evaluate(
+        "() => { const filled = window.__issecPrefilled === true;"
+        " window.__issecPrefilled = true; return filled; }"
+    )
+    if already_filled:
+        return
+    page.fill(USERNAME_SELECTOR, client.username)
+    page.fill(PASSWORD_SELECTOR, client.password)
+
+
+def _wait_for_human_login(
+    page: Page,
+    *,
+    client: IssecPortalClient,
+    timeout_seconds: float,
+) -> str:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         if page.is_closed():
@@ -133,6 +156,7 @@ def _wait_for_human_login(page: Page, *, timeout_seconds: float) -> str:
             session_id = _logged_in_session(page)
             if session_id:
                 return session_id
+            _prefill_login_once(page, client)
             page.wait_for_timeout(500)
         except PlaywrightError:
             # A página pode estar navegando; só o fechamento encerra a espera.

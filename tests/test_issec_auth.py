@@ -7,6 +7,7 @@ import pytest
 from nfs_fortaleza import issec_auth
 from nfs_fortaleza.issec_auth import (
     IssecInteractiveAuthError,
+    _prefill_login_once,
     _wait_for_human_login,
     authenticate_with_human_captcha,
 )
@@ -34,6 +35,12 @@ class FakePage:
         self.ticks = ticks_until_login
         self.closed = closed
         self.filled = {}
+        self.prefilled = False
+
+    def evaluate(self, _script):
+        filled = self.prefilled
+        self.prefilled = True
+        return filled
 
     def set_default_timeout(self, _value):
         return None
@@ -183,9 +190,31 @@ def test_erro_de_login_mantem_espera_na_tela_de_login():
     page = FakePage(ticks_until_login=10**9)
 
     with pytest.raises(IssecInteractiveAuthError, match="Tempo esgotado"):
-        _wait_for_human_login(page, timeout_seconds=0.01)
+        _wait_for_human_login(page, client=_client(), timeout_seconds=0.01)
 
 
 def test_janela_fechada_interrompe_a_espera():
     with pytest.raises(IssecInteractiveAuthError, match="fechada"):
-        _wait_for_human_login(FakePage(closed=True), timeout_seconds=5)
+        _wait_for_human_login(
+            FakePage(closed=True),
+            client=_client(),
+            timeout_seconds=5,
+        )
+
+
+def test_login_recusado_volta_preenchido_uma_vez_por_carregamento():
+    page = FakePage()
+    client = _client()
+
+    _prefill_login_once(page, client)
+    page.filled["#P9999_USERNAME"] = "editado"
+    _prefill_login_once(page, client)
+    assert page.filled["#P9999_USERNAME"] == "editado"
+
+    page.prefilled = False  # navegação após a recusa do portal
+    page.filled.clear()
+    _prefill_login_once(page, client)
+    assert page.filled == {
+        "#P9999_USERNAME": "1234567",
+        "#P9999_PASSWORD": "segredo",
+    }

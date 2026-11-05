@@ -266,8 +266,9 @@ O Follow-Up de Glosas da `api_prontocardio` lê essa tabela e vincula o processo
 isso `extracao_glosas_maida` não substitui esta DAG.
 
 O login do portal exige um captcha de imagem, resolvido por uma pessoa. A DAG
-abre o portal com usuário e senha preenchidos no mesmo desktop remoto do SPU e o
-Receita Certa exibe o modal a quem tem acesso à automação. Depois do clique em
+abre o portal com usuário e senha preenchidos no mesmo desktop remoto do SPU,
+inclusive depois de uma recusa do portal, e o Receita Certa exibe o modal a
+quem tem acesso à automação. Depois do clique em
 **Acessar**, a extração segue sozinha com a sessão criada. Sem resolução em
 `ISSEC_AUTH_TIMEOUT_SECONDS` (30 minutos), a tarefa falha sem nova tentativa e
 os dados continuam como estavam. A tarefa usa o pool `nfse_portal` para nunca
