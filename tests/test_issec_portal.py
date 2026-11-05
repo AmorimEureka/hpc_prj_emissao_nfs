@@ -11,6 +11,7 @@ from nfs_fortaleza.issec_portal import (
     IssecPortalError,
     extract_and_load_processos,
     parse_brl,
+    portal_issec_source,
     parse_process_detail,
     parse_process_links,
     select_months_to_scrape,
@@ -122,6 +123,7 @@ def test_carga_mantem_pipeline_e_tabela_lidos_pela_api(monkeypatch):
         password="senha",
         database_url="postgresql://destino",
         extracted_months=set(issec_portal.month_range(date(2026, 1, 1), date(2026, 8, 1))),
+        authenticate=lambda client: calls.setdefault("client", client),
         today=date(2026, 11, 5),
     )
 
@@ -130,6 +132,7 @@ def test_carga_mantem_pipeline_e_tabela_lidos_pela_api(monkeypatch):
         "dataset_name": "raw_issec_portal",
         "destination": "postgres",
     }
+    assert calls["source"]["client"] is calls["client"]
     assert calls["source"]["months"] == [
         date(2026, 9, 1),
         date(2026, 10, 1),
@@ -143,6 +146,7 @@ def test_carga_mantem_pipeline_e_tabela_lidos_pela_api(monkeypatch):
 
 def test_sem_meses_pendentes_nao_abre_pipeline(monkeypatch):
     monkeypatch.setattr(issec_portal, "select_months_to_scrape", lambda *a: [])
+    login = []
     monkeypatch.setattr(
         issec_portal.dlt,
         "pipeline",
@@ -154,9 +158,11 @@ def test_sem_meses_pendentes_nao_abre_pipeline(monkeypatch):
         password="senha",
         database_url="postgresql://destino",
         extracted_months=set(),
+        authenticate=login.append,
     )
 
     assert result == {"competencias": []}
+    assert login == []
 
 
 def test_dag_declara_id_agenda_e_conexao_oficial():
@@ -170,7 +176,54 @@ def test_dag_declara_id_agenda_e_conexao_oficial():
     }
     assert {
         "extracao_processos_portal_issec",
-        "0 5 * * *",
+        "0 8 * * 1-5",
+        "nfse_portal",
         "postgres_prontocardio",
     } <= strings
     assert "postgres_receita_certa" not in strings
+
+
+def test_fonte_percorre_os_meses_com_a_sessao_recebida():
+    class FakeClient:
+        def scrape_month(self, month):
+            return [{"processo": month.strftime("%Y%m")}]
+
+    source = portal_issec_source(
+        client=FakeClient(),
+        months=[date(2026, 9, 1), date(2026, 10, 1)],
+    )
+
+    assert source.name == "portal_issec"
+    assert list(source.resources["processos"]) == [
+        {"processo": "202609"},
+        {"processo": "202610"},
+    ]
+
+
+def test_cliente_adota_cookies_da_sessao_humana():
+    client = IssecPortalClient("usuario", "senha")
+
+    client.adopt_session(
+        [
+            {
+                "name": "ORA_WWV_APP_112",
+                "value": "abc",
+                "domain": "144.22.149.116",
+                "path": "/ords/",
+            }
+        ],
+        "123",
+    )
+
+    assert client.session_id == "123"
+    assert client.session.cookies.get("ORA_WWV_APP_112") == "abc"
+
+
+def test_sessao_vazia_e_recusada():
+    with pytest.raises(IssecPortalError):
+        IssecPortalClient("usuario", "senha").adopt_session([], "")
+
+
+def test_consulta_sem_login_humano_nao_tenta_autenticar():
+    with pytest.raises(IssecPortalError):
+        IssecPortalClient("usuario", "senha").list_processes(date(2026, 9, 1))
