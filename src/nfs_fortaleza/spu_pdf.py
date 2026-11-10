@@ -719,7 +719,9 @@ def _parse_cogestao_summary(rows: list[list[str]]) -> dict[str, str]:
         ),
         "competencia_tms": _value_after_label(rows, "Competencia TMS"),
         "competencia_producao": _value_after_label(rows, "Comp de Producao"),
-        "data_fechamento": _value_after_label(rows, "Dt Fechamento"),
+        # Recurso closings (e.g. RECURSOPROTOCOLO) leave this cell blank.
+        "data_fechamento": _optional_value_after_label(rows, "Dt Fechamento")
+        or "",
         "valor_informado": _value_after_label(
             rows,
             "Valor Informado",
