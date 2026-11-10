@@ -202,6 +202,30 @@ def test_parse_tramitando_report_allows_competence_to_be_enriched() -> None:
     assert rows[0]["competencia"] is None
 
 
+def test_parse_tramitando_report_drops_account_with_spaces() -> None:
+    # Database check: numero_conta cannot contain whitespace.
+    text = """
+    NOME DO PACIENTE: JOAO DE SOUZA
+    GUIA: 9001
+    CONTA: 908641 42,í343
+    ATENDIMENTO: 6001
+    COMPETENCIA: 09/2026
+    VALOR: 109,54
+    """
+
+    rows = parse_tramitando_report_pages(
+        [(1, [], text)],
+        numero_processo="P437156/2026",
+        documento_id="38884888",
+        documento_nome="RELATORIO_20158_38884888.pdf",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["numero_conta"] is None
+    assert rows[0]["cd_atendimento"] == 6001
+    assert rows[0]["numero_guia"] == "9001"
+
+
 def test_parse_tramitando_report_treats_corrupted_competence_as_missing() -> None:
     text = """
     NOME DO PACIENTE: JOAO DE SOUZA
