@@ -93,8 +93,9 @@ def demonstrativo_conta_ipm_resource(
     return dlt.resource(
         records(),
         name=TABLE_NAME,
+        # No merge_key: Maida rows share the table and the month. The IPM
+        # rows of a reloaded month are removed by delete_ipm_references.
         primary_key="id_registro",
-        merge_key="referencia",
         write_disposition="merge",
         columns=_column_hints(),
     )
@@ -177,7 +178,13 @@ def _column_hints() -> dict[str, dict[str, Any]]:
         for name in text_columns
     }
     hints["id_registro"]["nullable"] = False
-    hints["referencia"] = {"data_type": "date", "nullable": False}
+    # Explicitly off: the stored dlt schema still marks referencia as the
+    # merge key from earlier loads, which deleted Maida rows of the month.
+    hints["referencia"] = {
+        "data_type": "date",
+        "nullable": False,
+        "merge_key": False,
+    }
     hints["data_envio_lote"] = {"data_type": "date", "nullable": True}
     hints["data_realizacao"] = {"data_type": "date", "nullable": True}
     for name in (

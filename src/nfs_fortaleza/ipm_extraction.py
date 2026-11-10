@@ -18,6 +18,17 @@ from nfs_fortaleza.ipm_demonstrativo import (
 from nfs_fortaleza.ipm_portal import IpmPortalClient, IpmReference
 
 
+# The portal keeps issuing demonstratives for months already downloaded
+# (e.g. one issued on 2026-11-10 for 09/2026): the most recent references
+# are downloaded again on every run.
+RECENT_REFERENCES_TO_REFRESH = int(
+    os.getenv("IPM_REFRESH_RECENT_REFERENCES", "3")
+)
+# Maida writes its rows into the same table; they never count as IPM history
+# and are never removed when an IPM reference is reloaded.
+MAIDA_ORIGIN_COLUMN = "origem_maida"
+
+
 class IpmExtractionConfigurationError(ValueError):
     """Raised when dag_run.conf contains an invalid IPM reference."""
 
@@ -105,8 +116,12 @@ def extract_and_load_ipm_demonstratives(
     )
     available = client.list_references()
     candidates = _select_references(available, payload.references)
-    selected = _only_new_references(candidates, loaded)
-    skipped = tuple(sorted(set(candidates) & set(loaded)))
+    selected = _references_to_process(
+        candidates,
+        loaded,
+        requested=bool(payload.references),
+    )
+    skipped = tuple(sorted(set(candidates) - set(selected)))
 
     if not selected:
         return IpmExtractionSummary(
@@ -121,6 +136,9 @@ def extract_and_load_ipm_demonstratives(
         client.download_demonstrative(reference) for reference in selected
     )
 
+    # Replace only the IPM rows of the downloaded references; the resource
+    # merges by id_registro and Maida rows of the same month stay intact.
+    delete_ipm_references(settings, selected)
     os.environ["DESTINATION__POSTGRES__CREDENTIALS"] = settings.database_url
     pipeline = dlt.pipeline(
         pipeline_name="ipm_saude",
@@ -161,6 +179,10 @@ def list_loaded_ipm_references(
                 sql.Identifier(settings.postgres_schema),
                 sql.Identifier(TABLE_NAME),
             )
+            if _has_maida_rows(cursor, settings):
+                query = query + sql.SQL(" WHERE {} IS NULL").format(
+                    sql.Identifier(MAIDA_ORIGIN_COLUMN)
+                )
             cursor.execute(query)
             references = {
                 _reference_from_database(row[0])
@@ -168,6 +190,65 @@ def list_loaded_ipm_references(
                 if row[0] is not None
             }
     return tuple(sorted(references))
+
+
+def _has_maida_rows(cursor: Any, settings: IpmSettings) -> bool:
+    """Whether the shared table has the Maida origin column."""
+    cursor.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = %s
+              AND table_name = %s
+              AND column_name = %s
+        )
+        """,
+        (settings.postgres_schema, TABLE_NAME, MAIDA_ORIGIN_COLUMN),
+    )
+    return bool(cursor.fetchone()[0])
+
+
+def delete_ipm_references(
+    settings: IpmSettings,
+    references: tuple[IpmReference, ...],
+) -> None:
+    """Remove the IPM rows (never Maida's) of references about to reload.
+
+    If the load fails afterwards the reference no longer counts as loaded
+    and the next run downloads it again.
+    """
+    if not references:
+        return
+    with psycopg2.connect(settings.database_url) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = %s
+                      AND table_name = %s
+                )
+                """,
+                (settings.postgres_schema, TABLE_NAME),
+            )
+            if not cursor.fetchone()[0]:
+                return
+            query = sql.SQL(
+                "DELETE FROM {}.{} WHERE referencia = ANY(%s)"
+            ).format(
+                sql.Identifier(settings.postgres_schema),
+                sql.Identifier(TABLE_NAME),
+            )
+            if _has_maida_rows(cursor, settings):
+                query = query + sql.SQL(" AND {} IS NULL").format(
+                    sql.Identifier(MAIDA_ORIGIN_COLUMN)
+                )
+            cursor.execute(
+                query,
+                ([date(r.year, r.month, 1) for r in references],),
+            )
 
 
 def _reference_from_database(value: object) -> IpmReference:
@@ -205,6 +286,27 @@ def _select_references(
             f"Referencias nao disponiveis no portal IPM: {labels}."
         )
     return requested
+
+
+def _references_to_process(
+    candidates: tuple[IpmReference, ...],
+    loaded: tuple[IpmReference, ...],
+    *,
+    requested: bool = False,
+) -> tuple[IpmReference, ...]:
+    """New references plus the most recent ones, which still change.
+
+    References named in dag_run.conf are always processed again.
+    """
+    if requested:
+        return candidates
+    recent = (
+        set(candidates[-RECENT_REFERENCES_TO_REFRESH:])
+        if RECENT_REFERENCES_TO_REFRESH > 0
+        else set()
+    )
+    new = set(_only_new_references(candidates, loaded))
+    return tuple(sorted(new | recent))
 
 
 def _only_new_references(
