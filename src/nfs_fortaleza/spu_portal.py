@@ -581,6 +581,9 @@ class SpuPortalClient:
                 f"Arvore de documentos invalida para {process.numero_processo}."
             )
         numero_ano = str(process_data.get("numeroAno") or process.numero_ano)
+        # Materializer v2 (since 2026-11) serves documents from the process
+        # context: /v2/materializacoes/<n>/contextos/<c>/itens/__ITEM_ID__.
+        preview_path = str(process_data.get("previewPath") or "")
         itens = process_data.get("itens")
         setores = itens.get("setores") if isinstance(itens, dict) else None
         if not isinstance(setores, list):
@@ -656,6 +659,7 @@ class SpuPortalClient:
                 sector=sector,
                 document_id=document_id,
                 name=name,
+                preview_path=preview_path,
             )
             downloads.append(
                 SpuDocument(
@@ -894,6 +898,13 @@ class SpuPortalClient:
             )
         url = process.url_visualizacao
         self._validate_navigation_url(url)
+        # Materializer v2 sets one cookie per opened process; in the
+        # persistent profile they pile up until nginx answers 400 (cookie
+        # too large). The portal issues a fresh one through its token
+        # redirect, so only the materializer domain is cleared.
+        self._require_context().clear_cookies(
+            domain=urlsplit(self.settings.materializer_origin).netloc
+        )
         page.goto(
             url,
             wait_until="domcontentloaded",
@@ -952,6 +963,7 @@ class SpuPortalClient:
         sector: str,
         document_id: str,
         name: str,
+        preview_path: str = "",
     ) -> Path:
         context = self._require_context()
         directory = (
@@ -968,10 +980,11 @@ class SpuPortalClient:
                 if existing.read(4) == b"%PDF":
                     LOGGER.debug("SPU PDFs: reutilizando %s.", destination)
                     return destination
-        url = (
-            f"{self.settings.materializer_origin}/processos/"
-            f"{quote(numero_ano, safe='_')}/documento_so/"
-            f"{quote(document_id, safe='')}/pdf?download_file=true"
+        url = document_download_url(
+            self.settings.materializer_origin,
+            numero_ano=numero_ano,
+            document_id=document_id,
+            preview_path=preview_path,
         )
         response = None
         for attempt in range(1, 5):
@@ -1011,8 +1024,14 @@ class SpuPortalClient:
             )
         content = response.body()
         if not content.startswith(b"%PDF"):
+            reason = (
+                " (materializador respondeu Sessao Invalida)"
+                if "Sessão Inválida".encode() in content
+                else ""
+            )
             raise SpuPortalError(
-                f"Documento {name!r} de {process.numero_processo} nao e PDF."
+                f"Documento {name!r} de {process.numero_processo} nao e PDF"
+                f"{reason}."
             )
 
         temporary = destination.with_suffix(".pdf.part")
@@ -1196,6 +1215,27 @@ def canonical_spu_sector(value: str) -> str:
     }:
         return "ipm/saudecogestao"
     return normalized
+
+
+def document_download_url(
+    materializer_origin: str,
+    *,
+    numero_ano: str,
+    document_id: str,
+    preview_path: str = "",
+) -> str:
+    """URL of one document: the v2 preview path when the tree gives one."""
+    item = quote(document_id, safe="")
+    if "__ITEM_ID__" in preview_path:
+        path = preview_path.replace("__ITEM_ID__", item)
+        if not path.startswith("/"):
+            path = "/" + path
+        return f"{materializer_origin.rstrip('/')}{path}"
+    return (
+        f"{materializer_origin}/processos/"
+        f"{quote(numero_ano, safe='_')}/documento_so/"
+        f"{item}/pdf?download_file=true"
+    )
 
 
 def _is_target_document(sector: str, name: str) -> bool:
