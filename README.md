@@ -26,7 +26,7 @@ Emissão e extração são funcionalidades independentes:
 | `emissao_nfse` | Emitir solicitações aprovadas, baixar o PDF e registrar o resultado | Manual ou API REST, sem agendamento |
 | `extracao_nfse` | Consultar notas existentes, baixar XML e carregar `nfse_xml` | A cada 15 minutos ou manualmente |
 | `extracao_demonstrativo_conta_ipm` | Extrair contas médicas e carregar `demonstrativo_conta_ipm` | Diariamente às 04:00 ou manualmente |
-| `extracao_processos_virtuais_spu` | Extrair processos e PDFs IPM do SPU | Diariamente às 05:00 ou manualmente |
+| `extracao_processos_virtuais_spu` | Extrair processos e PDFs IPM do SPU | Diariamente às 08:20 (Fortaleza) ou manualmente |
 | `materializacao_glosas_ipm` | Carregar o estágio Oracle e executar as sete regras no dbt | Acionada ao término das extrações IPM/SPU |
 
 ```mermaid
@@ -1165,7 +1165,7 @@ disponível para ambientes que já provisionem um arquivo Playwright
 | `SPU_MATERIALIZER_URL` | `https://spumaterializar.sepog.fortaleza.ce.gov.br` |
 | `SPU_LOGIN` / `SPU_PASSWORD` | Credenciais da pessoa jurídica |
 | `SPU_POSTGRES_CONN_ID` | `postgres_prontocardio` |
-| `SPU_EXTRACTION_SCHEDULE` | `0 5 * * *` |
+| `SPU_EXTRACTION_SCHEDULE` | `20 8 * * *` (horário de Fortaleza) |
 | `SPU_DOWNLOADS_DIR` | `/usr/local/airflow/data/spu` |
 | `SPU_BROWSER_PROFILE_DIR` | `/usr/local/airflow/data/spu/browser_profile` |
 | `SPU_STORAGE_STATE_PATH` | `/usr/local/airflow/data/spu/auth_state.json` |
