@@ -223,6 +223,29 @@ def test_parse_tramitando_report_treats_corrupted_competence_as_missing() -> Non
     assert rows[0]["competencia"] is None
 
 
+def test_parse_saude_cogestao_accepts_blank_closing_date() -> None:
+    # Recurso closing (RECURSOPROTOCOLO): "Dt Fechamento" printed, no value.
+    summary = [list(row) for row in SUMMARY]
+    summary[2] = [
+        "Número Processo",
+        "P298530/2026",
+        "Competência TMS",
+        "07/2026",
+        "Dt Fechamento",
+        "",
+    ]
+    rows = parse_saude_cogestao_pages(
+        [(1, [summary, [PROTOCOL_HEADER, ["123", "1.100,00", "100,00", "1.000,00"]]], "")],
+        numero_processo="P298530/2026",
+        documento_id="doc-1",
+        documento_nome="RECURSOPROTOCOLO P298530-2026 0000039",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["data_fechamento"] is None
+    assert rows[0]["valor_aprovado_protocolo"] == Decimal("1000.00")
+
+
 def test_parse_saude_cogestao_joins_tables_across_pdf_pages() -> None:
     first = [
         "123",
