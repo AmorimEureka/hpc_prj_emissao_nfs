@@ -14,6 +14,7 @@ from nfs_fortaleza.spu_portal import (
     _is_report_process_eligible,
     _is_tramitando_report_document,
     canonical_spu_sector,
+    document_download_url,
     parse_process_card,
     spu_profile_lock,
 )
@@ -413,3 +414,121 @@ def test_profile_lock_removes_stale_chromium_singletons(
             not (profile_dir / name).is_symlink()
             for name in singleton_names
         )
+
+
+MATERIALIZER = "https://spumaterializar.sepog.fortaleza.ce.gov.br"
+PREVIEW = (
+    "/v2/materializacoes/P298530_2026/contextos/e652/itens/__ITEM_ID__"
+)
+
+
+def test_document_url_uses_v2_preview_path_when_tree_has_one() -> None:
+    assert document_download_url(
+        MATERIALIZER,
+        numero_ano="P298530_2026",
+        document_id="51778574",
+        preview_path=PREVIEW,
+    ) == (
+        f"{MATERIALIZER}/v2/materializacoes/P298530_2026/contextos/e652/"
+        "itens/51778574"
+    )
+    # Trees without previewPath keep the previous materializer route.
+    assert document_download_url(
+        MATERIALIZER, numero_ano="P298530_2026", document_id="51778574"
+    ) == (
+        f"{MATERIALIZER}/processos/P298530_2026/documento_so/51778574/"
+        "pdf?download_file=true"
+    )
+
+
+def _finalized_process() -> SpuProcessSummary:
+    return SpuProcessSummary(
+        numero_processo="P298530/2026",
+        status_processo="FINALIZADO",
+        tipo_processo_assunto="Pagamento",
+        data_abertura=date(2026, 7, 1),
+        motivo_finalizacao="Processo pago",
+        url_visualizacao=(
+            "https://spuvirtual.sepog.fortaleza.ce.gov.br/processos/x/"
+            "materializar_v2"
+        ),
+    )
+
+
+def test_documents_are_downloaded_through_the_v2_preview_path() -> None:
+    client = SpuPortalClient.__new__(SpuPortalClient)
+    client._page = object()
+    tree = {
+        "processo": {
+            "numeroAno": "P298530_2026",
+            "previewPath": PREVIEW,
+            "itens": {
+                "setores": [
+                    {
+                        "setor": "IPM/SAUDECOGESTAO",
+                        "documentos": [{"id": 7, "nome": "Demonstrativo"}],
+                    }
+                ]
+            },
+        }
+    }
+    calls = []
+    client._open_folder_tree = lambda page, process: tree
+    client._download_pdf = lambda process, **kw: calls.append(kw) or Path("x")
+    client.download_process_documents(_finalized_process())
+    assert calls == [{
+        "numero_ano": "P298530_2026",
+        "sector": "IPM/SAUDECOGESTAO",
+        "document_id": "7",
+        "name": "Demonstrativo",
+        "preview_path": PREVIEW,
+    }]
+
+
+def test_folder_tree_clears_only_materializer_cookies_before_opening() -> None:
+    events = []
+
+    class Element:
+        first = None
+
+        def __init__(self, present):
+            self.present = present
+            self.first = self
+
+        def count(self):
+            return 1 if self.present else 0
+
+        def wait_for(self, **_kw):
+            return None
+
+        def get_attribute(self, _name):
+            return '{"dataTree": {"processo": {"itens": {"setores": []}}}}'
+
+    class Page:
+        url = MATERIALIZER + "/v2/materializacoes/P298530_2026"
+
+        def goto(self, url, **_kw):
+            events.append(("goto", url))
+
+        def locator(self, selector):
+            return Element("FolderProcessoSo" in selector)
+
+    class Context:
+        def clear_cookies(self, **kw):
+            events.append(("clear_cookies", kw))
+
+    client = SpuPortalClient.__new__(SpuPortalClient)
+    client.settings = SimpleNamespace(
+        materializer_origin=MATERIALIZER,
+        portal_origin="https://spuvirtual.sepog.fortaleza.ce.gov.br",
+        page_timeout_seconds=5,
+    )
+    client._context = Context()
+    client._is_login_page = lambda page: False
+    tree = client._open_folder_tree(Page(), _finalized_process())
+    assert tree == {"processo": {"itens": {"setores": []}}}
+    assert events[0] == (
+        "clear_cookies",
+        {"domain": "spumaterializar.sepog.fortaleza.ce.gov.br"},
+    )
+    assert events[1][0] == "goto"
