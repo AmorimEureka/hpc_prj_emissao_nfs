@@ -83,7 +83,8 @@ def _execute_with_session_renewal(
         "Extrai novos processos virtuais do SPU, materializa PDFs do IPM e "
         "carrega os dados com dlt."
     ),
-    schedule=os.getenv("SPU_EXTRACTION_SCHEDULE", "0 5 * * *"),
+    # Cron no fuso do start_date (America/Fortaleza): 08:20 local.
+    schedule=os.getenv("SPU_EXTRACTION_SCHEDULE", "20 8 * * *"),
     start_date=pendulum.datetime(2026, 1, 1, tz="America/Fortaleza"),
     catchup=False,
     max_active_runs=1,
