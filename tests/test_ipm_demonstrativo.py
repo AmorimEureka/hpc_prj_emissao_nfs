@@ -13,7 +13,9 @@ from nfs_fortaleza.ipm_extraction import (
     IpmExtractionPayload,
     _only_new_references,
     _reference_from_database,
+    _references_to_process,
     _select_references,
+    delete_ipm_references,
     extract_and_load_ipm_demonstratives,
     list_loaded_ipm_references,
 )
@@ -139,6 +141,68 @@ class IpmExtractionPayloadTests(unittest.TestCase):
         self.assertEqual(references, ())
         cursor.fetchall.assert_not_called()
 
+    def test_reference_is_not_a_merge_key_anymore(self) -> None:
+        # A stored merge_key hint survives unless explicitly switched off;
+        # it deleted the Maida rows of the reloaded month.
+        from nfs_fortaleza.ipm_demonstrativo import _column_hints
+
+        self.assertIs(_column_hints()["referencia"]["merge_key"], False)
+
+    def test_refreshes_recent_references_even_when_loaded(self) -> None:
+        refs = tuple(
+            IpmReference.parse(label)
+            for label in ("06/2026", "07/2026", "08/2026", "09/2026")
+        )
+        # 09/2026 already "loaded": its demonstratives keep being issued.
+        with patch("nfs_fortaleza.ipm_extraction.RECENT_REFERENCES_TO_REFRESH", 3):
+            self.assertEqual(
+                _references_to_process(refs, refs),
+                refs[1:],
+            )
+            # A reference never loaded is processed even outside the window.
+            self.assertEqual(
+                _references_to_process(refs, refs[1:]),
+                refs,
+            )
+        with patch("nfs_fortaleza.ipm_extraction.RECENT_REFERENCES_TO_REFRESH", 0):
+            self.assertEqual(_references_to_process(refs, refs), ())
+            # References named in dag_run.conf are always processed again.
+            self.assertEqual(
+                _references_to_process(refs[:1], refs, requested=True),
+                refs[:1],
+            )
+
+    @patch("nfs_fortaleza.ipm_extraction.psycopg2.connect")
+    def test_maida_rows_do_not_count_as_loaded_ipm_reference(self, connect) -> None:
+        connection = connect.return_value.__enter__.return_value
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.side_effect = [(True,), (True,)]
+        cursor.fetchall.return_value = [(date(2026, 8, 1),)]
+
+        references = list_loaded_ipm_references(self._settings())
+
+        self.assertEqual(references, (IpmReference.parse("08/2026"),))
+        query = cursor.execute.call_args_list[-1].args[0]
+        self.assertIn("IS NULL", repr(query))
+        self.assertIn("origem_maida", repr(query))
+
+    @patch("nfs_fortaleza.ipm_extraction.psycopg2.connect")
+    def test_reload_deletes_only_ipm_rows_of_the_references(self, connect) -> None:
+        connection = connect.return_value.__enter__.return_value
+        cursor = connection.cursor.return_value.__enter__.return_value
+        cursor.fetchone.side_effect = [(True,), (True,)]
+
+        delete_ipm_references(
+            self._settings(), (IpmReference.parse("09/2026"),)
+        )
+
+        query, params = cursor.execute.call_args_list[-1].args
+        self.assertIn("DELETE FROM", repr(query))
+        self.assertIn("origem_maida", repr(query))
+        self.assertIn("IS NULL", repr(query))
+        self.assertEqual(params, ([date(2026, 9, 1)],))
+
+    @patch("nfs_fortaleza.ipm_extraction.delete_ipm_references")
     @patch("nfs_fortaleza.ipm_extraction.dlt.pipeline")
     @patch("nfs_fortaleza.ipm_extraction.IpmPortalClient")
     @patch("nfs_fortaleza.ipm_extraction.list_loaded_ipm_references")
@@ -147,22 +211,58 @@ class IpmExtractionPayloadTests(unittest.TestCase):
         list_loaded,
         portal_client_class,
         pipeline,
+        delete,
     ) -> None:
         reference = IpmReference.parse("05/2026")
         list_loaded.return_value = (reference,)
         portal_client = MagicMock()
         portal_client.list_references.return_value = (reference,)
         portal_client_class.return_value = portal_client
+        with patch("nfs_fortaleza.ipm_extraction.RECENT_REFERENCES_TO_REFRESH", 0):
+            summary = extract_and_load_ipm_demonstratives(
+                self._settings(),
+                IpmExtractionPayload(),
+                downloads_dir=Path("/tmp/ipm-test"),
+            )
+
+        self.assertEqual(summary.processed_references, ())
+        self.assertEqual(summary.skipped_references, (reference,))
+        portal_client.download_demonstrative.assert_not_called()
+        pipeline.assert_not_called()
+        delete.assert_not_called()
+
+    @patch("nfs_fortaleza.ipm_extraction.demonstrativo_conta_ipm_resource")
+    @patch("nfs_fortaleza.ipm_extraction.delete_ipm_references")
+    @patch("nfs_fortaleza.ipm_extraction.dlt.pipeline")
+    @patch("nfs_fortaleza.ipm_extraction.IpmPortalClient")
+    @patch("nfs_fortaleza.ipm_extraction.list_loaded_ipm_references")
+    def test_recent_loaded_reference_is_downloaded_and_replaced(
+        self,
+        list_loaded,
+        portal_client_class,
+        pipeline,
+        delete,
+        _resource,
+    ) -> None:
+        reference = IpmReference.parse("09/2026")
+        list_loaded.return_value = (reference,)
+        portal_client = MagicMock()
+        portal_client.list_references.return_value = (reference,)
+        portal_client_class.return_value = portal_client
+        events = []
+        delete.side_effect = lambda *a: events.append("delete")
+        pipeline.return_value.run.side_effect = lambda *a: events.append("load")
+
         summary = extract_and_load_ipm_demonstratives(
             self._settings(),
             IpmExtractionPayload(),
             downloads_dir=Path("/tmp/ipm-test"),
         )
 
-        self.assertEqual(summary.processed_references, ())
-        self.assertEqual(summary.skipped_references, (reference,))
-        portal_client.download_demonstrative.assert_not_called()
-        pipeline.assert_not_called()
+        self.assertEqual(summary.processed_references, (reference,))
+        portal_client.download_demonstrative.assert_called_once_with(reference)
+        self.assertEqual(delete.call_args.args[1], (reference,))
+        self.assertEqual(events, ["delete", "load"])
 
 
 if __name__ == "__main__":
