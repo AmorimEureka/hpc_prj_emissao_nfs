@@ -286,6 +286,18 @@ def _tramitando_report_record(
     if cd_remessa is None or paciente is None or valor is None:
         return None
     atendimento_digits = _digits(values.get("cd_atendimento", ""))
+    numero_conta = _optional(values.get("numero_conta"))
+    if numero_conta and re.search(r"\s", numero_conta):
+        # OCR of the fixed-width columns mixed text into the account; the
+        # table rejects accounts with spaces and the whole load batch
+        # failed (no report rows loaded since 2026-08-24). Keep the row,
+        # drop only the unreliable account.
+        LOGGER.warning(
+            "SPU relatorios: conta ilegivel descartada em %s, pagina %s.",
+            numero_processo,
+            pagina_pdf,
+        )
+        numero_conta = None
     record = {
         "numero_processo": numero_processo,
         "documento_id": documento_id,
@@ -294,7 +306,7 @@ def _tramitando_report_record(
         "cd_remessa": cd_remessa,
         "nome_paciente": paciente,
         "numero_guia": _optional(values.get("numero_guia")),
-        "numero_conta": _optional(values.get("numero_conta")),
+        "numero_conta": numero_conta,
         "cd_atendimento": int(atendimento_digits) if atendimento_digits else None,
         "competencia": competencia,
         "valor": valor,
