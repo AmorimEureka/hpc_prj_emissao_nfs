@@ -34,7 +34,7 @@ TIMEOUT_SECONDS = float(os.getenv("MAIDA_TIMEOUT_SECONDS", "60"))
         "Extrai demonstrativos e lotes com glosa do Maida via APIs e carrega "
         "os registros idempotentes com dlt."
     ),
-    schedule=os.getenv("MAIDA_EXTRACTION_SCHEDULE", "0 */6 * * *"),
+    schedule=os.getenv("MAIDA_EXTRACTION_SCHEDULE", "0 2,8,14,20 * * *"),
     start_date=pendulum.datetime(2026, 1, 1, tz="America/Fortaleza"),
     catchup=False,
     max_active_runs=1,
