@@ -87,7 +87,10 @@ class ExportCompetenciaInscricoesTests(unittest.TestCase):
             ]
         )
         validate.assert_has_calls(
-            [call(first_export, first), call(second_export, second)]
+            [
+                call(first_export, first, "prestador"),
+                call(second_export, second, "prestador"),
+            ]
         )
 
 

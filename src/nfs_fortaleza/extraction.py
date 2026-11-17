@@ -19,6 +19,7 @@ from nfs_fortaleza.periods import (
     parse_month_period,
 )
 from nfs_fortaleza.portal import (
+    VISAO_PRESTADOR,
     PeriodWithoutInvoicesError,
     PortalClient,
     PortalOptions,
@@ -137,12 +138,17 @@ def extract_and_load_nfse(
     payload: ExtractionPayload,
     *,
     options: PortalOptions,
+    table_name: str = "nfse_xml",
 ) -> ExtractionSummary:
     client = PortalClient(settings, options)
     downloaded: list[Path] = []
     empty_periods: list[str] = []
 
     if payload.cnpj and payload.numero_nfse:
+        if options.visao != VISAO_PRESTADOR:
+            raise ExtractionConfigurationError(
+                "Consulta por cnpj/numero_nfse so existe para notas emitidas (visao prestador)."
+            )
         try:
             files = client.export_nfse(payload.cnpj, payload.numero_nfse)
         except PeriodWithoutInvoicesError:
@@ -166,7 +172,7 @@ def extract_and_load_nfse(
             empty_periods.append(period.label)
             continue
         for file_path in files:
-            load_nfse_xml(settings, file_path, period)
+            load_nfse_xml(settings, file_path, period, table_name=table_name)
             downloaded.append(file_path)
 
     return ExtractionSummary(

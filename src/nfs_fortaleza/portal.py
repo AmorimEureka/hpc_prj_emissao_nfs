@@ -22,6 +22,19 @@ from nfs_fortaleza.periods import DateRangePeriod, MonthPeriod
 CONSULTA_NFSE_PAGE = "pages/nfse/consultaNfsePorNumero.seam"
 QueryPeriod = MonthPeriod | DateRangePeriod
 
+# "Serviços Prestados" (opTipoRelatorio=1): notas emitidas pelas inscrições.
+# "Serviços Tomados" (opTipoRelatorio=2): notas recebidas pelas inscrições.
+VISAO_PRESTADOR = "prestador"
+VISAO_TOMADOR = "tomador"
+VISOES = (VISAO_PRESTADOR, VISAO_TOMADOR)
+
+# Ids dos componentes RichFaces da aba "Período de Emissão/Tomador",
+# levantados no portal em 17/11/2026 (consultaNfsePorNumero.seam).
+TOMADOR_TROCA_TIPO_EVENT = "consultarnfseForm:j_id178"
+TOMADOR_PERIODO_TAB = "consultarnfseForm:abaPorPeriodoTomador_tab"
+TOMADOR_PERIODO_TAB_EVENT = "consultarnfseForm:j_id250"
+TOMADOR_CONSULTAR_EVENT = "consultarnfseForm:j_id317"
+
 
 class PeriodWithoutInvoicesError(RuntimeError):
     """Raised when the NFS-e query has no result for the requested period."""
@@ -38,6 +51,11 @@ class PortalOptions:
     timeout_ms: int = 45_000
     query_date: date | None = None
     ca_bundle: Path | None = None
+    visao: str = VISAO_PRESTADOR
+
+    def __post_init__(self) -> None:
+        if self.visao not in VISOES:
+            raise ValueError(f"visao deve ser uma de {VISOES}: {self.visao!r}")
 
 
 @dataclass(frozen=True)
@@ -107,7 +125,7 @@ class PortalClient:
                     competencia,
                     row,
                 )
-                _validate_exported_inscricao(exported, row)
+                _validate_exported_inscricao(exported, row, self.options.visao)
                 downloaded.append(exported)
             except PeriodWithoutInvoicesError:
                 ignored.append(row.label)
@@ -257,49 +275,15 @@ class PortalClient:
             raise RuntimeError(f"Tela Consultar NFS-e nao abriu. Debug salvo em {debug}")
         view_state = _extract_view_state(html)
 
-        view_state = self._ajax_post(
-            session,
-            query_url,
-            {
+        for step in self._period_tab_steps():
+            payload = {
                 "AJAXREQUEST": "_viewRoot",
                 "consultarnfseForm": "consultarnfseForm",
-                "consultarnfseForm:opTipoRelatorio": "1",
-                "consultarnfseForm:numNfse": "",
+                **step,
                 "javax.faces.ViewState": view_state,
-                "consultarnfseForm:j_id170": "consultarnfseForm:j_id170",
                 "AJAX:EVENTS_COUNT": "1",
-            },
-            view_state,
-        )
-        view_state = self._ajax_post(
-            session,
-            query_url,
-            {
-                "AJAXREQUEST": "_viewRoot",
-                "consultarnfseForm": "consultarnfseForm",
-                "consultarnfseForm:opTipoRelatorio": "1",
-                "consultarnfseForm:numNfse": "",
-                "javax.faces.ViewState": view_state,
-                "ajaxSingle": "consultarnfseForm:periodo_prestador_tab",
-                "consultarnfseForm:j_id191": "consultarnfseForm:j_id191",
-                "AJAX:EVENTS_COUNT": "1",
-            },
-            view_state,
-        )
-        view_state = self._ajax_post(
-            session,
-            query_url,
-            {
-                "AJAXREQUEST": "_viewRoot",
-                "consultarnfseForm": "consultarnfseForm",
-                "consultarnfseForm:opTipoRelatorio": "1",
-                "consultarnfseForm:numNfse": "",
-                "javax.faces.ViewState": view_state,
-                "consultarnfseForm:periodo_prestador_tab": "consultarnfseForm:periodo_prestador_tab",
-                "AJAX:EVENTS_COUNT": "1",
-            },
-            view_state,
-        )
+            }
+            view_state = self._ajax_post(session, query_url, payload, view_state)
 
         response = self._request_post(session, query_url, self._query_payload(competencia, view_state), ajax=True)
         current_text = unescape(response.text)
@@ -330,7 +314,7 @@ class PortalClient:
                 row_command_ids,
                 start=1,
             ):
-                prefix = _download_prefix(competencia, inscricao)
+                prefix = _download_prefix(competencia, inscricao, self.options.visao)
                 file_name = (
                     f"{prefix}"
                     f"-p{page_index:03d}-n{row_position:03d}.xml"
@@ -362,7 +346,10 @@ class PortalClient:
             )
         if len(downloaded) == 1:
             return downloaded[0]
-        return self._zip_downloads(downloaded, f"{_download_prefix(competencia, inscricao)}.zip")
+        return self._zip_downloads(
+            downloaded,
+            f"{_download_prefix(competencia, inscricao, self.options.visao)}.zip",
+        )
 
     def _export_nfse_with_requests(
         self,
@@ -468,7 +455,63 @@ class PortalClient:
         response = self._request_post(session, url, payload, ajax=True)
         return _extract_view_state(response.text, default=current_view_state)
 
+    def _period_tab_steps(self) -> list[dict[str, str]]:
+        """Eventos AJAX que deixam a aba de período da visão ativa no servidor."""
+        if self.options.visao == VISAO_TOMADOR:
+            base = {"consultarnfseForm:opTipoRelatorio": "2"}
+            return [
+                {
+                    **base,
+                    TOMADOR_TROCA_TIPO_EVENT: TOMADOR_TROCA_TIPO_EVENT,
+                    "consultarnfseForm:paramSelectedTabTomador": "abaPorPeriodoTomador_tab",
+                    "consultarnfseForm:paramSelectedTabPrestador": "numero_doc_tab_id",
+                },
+                {
+                    **base,
+                    "ajaxSingle": TOMADOR_PERIODO_TAB,
+                    TOMADOR_PERIODO_TAB_EVENT: TOMADOR_PERIODO_TAB_EVENT,
+                },
+                {**base, TOMADOR_PERIODO_TAB: TOMADOR_PERIODO_TAB},
+            ]
+        base = {
+            "consultarnfseForm:opTipoRelatorio": "1",
+            "consultarnfseForm:numNfse": "",
+        }
+        return [
+            {**base, "consultarnfseForm:j_id170": "consultarnfseForm:j_id170"},
+            {
+                **base,
+                "ajaxSingle": "consultarnfseForm:periodo_prestador_tab",
+                "consultarnfseForm:j_id191": "consultarnfseForm:j_id191",
+            },
+            {
+                **base,
+                "consultarnfseForm:periodo_prestador_tab": "consultarnfseForm:periodo_prestador_tab",
+            },
+        ]
+
+    def _tomador_period_fields(self, competencia: QueryPeriod) -> dict[str, str]:
+        query_end_day = competencia.query_end_day(self.query_date)
+        return {
+            "consultarnfseForm:opTipoRelatorio": "2",
+            "consultarnfseForm:dataInicialTomadorInputDate": competencia.first_day_br,
+            "consultarnfseForm:dataInicialTomadorInputCurrentDate": competencia.start_month_year_br,
+            "consultarnfseForm:dataFinalTomadorInputDate": query_end_day.strftime("%d/%m/%Y"),
+            "consultarnfseForm:dataFinalTomadorInputCurrentDate": query_end_day.strftime("%m/%Y"),
+            # 2 = "Todos" (prestadores pessoa física e jurídica)
+            "consultarnfseForm:opPrestador": "2",
+        }
+
     def _query_payload(self, competencia: QueryPeriod, view_state: str) -> dict[str, str]:
+        if self.options.visao == VISAO_TOMADOR:
+            return {
+                "AJAXREQUEST": "_viewRoot",
+                "consultarnfseForm": "consultarnfseForm",
+                **self._tomador_period_fields(competencia),
+                "javax.faces.ViewState": view_state,
+                TOMADOR_CONSULTAR_EVENT: TOMADOR_CONSULTAR_EVENT,
+                "AJAX:EVENTS_COUNT": "1",
+            }
         query_end_day = competencia.query_end_day(self.query_date)
         end_date = query_end_day.strftime("%d/%m/%Y")
         return {
@@ -486,6 +529,12 @@ class PortalClient:
         }
 
     def _form_payload(self, competencia: QueryPeriod, view_state: str) -> dict[str, str]:
+        if self.options.visao == VISAO_TOMADOR:
+            return {
+                "consultarnfseForm": "consultarnfseForm",
+                **self._tomador_period_fields(competencia),
+                "javax.faces.ViewState": view_state,
+            }
         query_end_day = competencia.query_end_day(self.query_date)
         end_date = query_end_day.strftime("%d/%m/%Y")
         return {
@@ -810,14 +859,22 @@ def _find_inscricao_by_cnpj(rows: list[InscricaoRow], cnpj: str) -> InscricaoRow
     )
 
 
-def _validate_exported_inscricao(path: Path, inscricao: InscricaoRow) -> None:
+def _validate_exported_inscricao(
+    path: Path,
+    inscricao: InscricaoRow,
+    visao: str = VISAO_PRESTADOR,
+) -> None:
+    """Confere que o XML pertence à inscrição: prestador (emitidas) ou tomador (recebidas)."""
     expected = _digits(inscricao.documento)
     returned: set[str] = set()
+    identification_tag = (
+        "IdentificacaoTomador" if visao == VISAO_TOMADOR else "IdentificacaoPrestador"
+    )
 
     for xml_content in _iter_exported_xml(path):
         root = ET.fromstring(xml_content)
         for identification in root.iter():
-            if _xml_local_name(identification.tag) != "IdentificacaoPrestador":
+            if _xml_local_name(identification.tag) != identification_tag:
                 continue
             for element in identification.iter():
                 if _xml_local_name(element.tag) == "Cnpj" and element.text:
@@ -827,7 +884,7 @@ def _validate_exported_inscricao(path: Path, inscricao: InscricaoRow) -> None:
 
     if not returned:
         raise RuntimeError(
-            "XML exportado nao informa o CNPJ do prestador; carga cancelada."
+            f"XML exportado nao informa o CNPJ do {visao}; carga cancelada."
         )
     if returned != {expected}:
         raise RuntimeError(
@@ -861,8 +918,13 @@ def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip().lower()
 
 
-def _download_prefix(competencia: QueryPeriod, inscricao: InscricaoRow | None) -> str:
-    prefix = f"NF-consulta-servicos-prestados-{competencia.yyyymm}"
+def _download_prefix(
+    competencia: QueryPeriod,
+    inscricao: InscricaoRow | None,
+    visao: str = VISAO_PRESTADOR,
+) -> str:
+    tipo = "tomados" if visao == VISAO_TOMADOR else "prestados"
+    prefix = f"NF-consulta-servicos-{tipo}-{competencia.yyyymm}"
     if inscricao is None:
         return prefix
     inscricao_id = _digits(inscricao.inscricao) or inscricao.index
