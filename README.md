@@ -25,6 +25,7 @@ Emissão e extração são funcionalidades independentes:
 | --- | --- | --- |
 | `emissao_nfse` | Emitir solicitações aprovadas, baixar o PDF e registrar o resultado | Manual ou API REST, sem agendamento |
 | `extracao_nfse` | Consultar notas existentes, baixar XML e carregar `nfse_xml` | A cada 15 minutos ou manualmente |
+| `extracao_nfse_tomador` | Baixar as NFS-e **recebidas** (Serviços Tomados) e carregar `nfse_xml_tomador` para o Contas a Pagar | A cada 2 horas, 07h40–19h40, seg–sáb, ou manualmente |
 | `extracao_demonstrativo_conta_ipm` | Extrair contas médicas e carregar `demonstrativo_conta_ipm` | Diariamente às 04:00 ou manualmente |
 | `extracao_processos_virtuais_spu` | Extrair processos e PDFs IPM do SPU | Diariamente às 08:20 (Fortaleza) ou manualmente |
 | `materializacao_glosas_ipm` | Carregar o estágio Oracle e executar as sete regras no dbt | Acionada ao término das extrações IPM/SPU |
@@ -826,6 +827,42 @@ docker ps --filter name=prj-web-nfs --filter name=scheduler \
 
 Para outra competência, altere tanto `202608` no `run-id` quanto `08/2026` no
 `--conf`.
+
+### NFS-e recebidas — `extracao_nfse_tomador`
+
+A DAG `extracao_nfse` consulta **Serviços Prestados** (`opTipoRelatorio=1`):
+notas emitidas pelas inscrições do grupo. Para o Contas a Pagar, a DAG
+`extracao_nfse_tomador` consulta **Serviços Tomados** (`opTipoRelatorio=2`),
+aba *Período de Emissão/Tomador*, em todas as inscrições disponíveis ao login,
+e carrega a tabela `nfse_xml_tomador` com o mesmo parser e a mesma
+deduplicação (chave fiscal ou CNPJ do prestador + número).
+
+- Cada XML é validado: o CNPJ do **tomador** precisa ser o da inscrição
+  consultada; caso contrário a carga é cancelada.
+- Usa o mesmo pool `nfse_portal` da `extracao_nfse`, para que as duas nunca
+  abram sessões simultâneas no portal com o mesmo login.
+- Aceita os filtros `competencia` e `inicio`/`fim` do `dag_run.conf`. A
+  consulta por `cnpj`/`numero_nfse` só existe para notas emitidas.
+- Cobertura: o portal de Fortaleza só lista notas emitidas **no sistema de
+  Fortaleza**. Em 1–16/11/2026 foram 47 notas (43 do Hospital e 4 do Pronto
+  Atendimento); fornecedores de outros municípios não aparecem aqui.
+- Os ids dos componentes RichFaces (`j_id178`, `j_id250`, `j_id317`) foram
+  levantados no portal em 17/11/2026 e ficam em constantes no `portal.py`.
+  Se o portal mudar, a consulta passa a responder "Campo Número Nfs-e é
+  obrigatório" e a DAG falha sem carregar dados parciais.
+
+| Variável | Padrão |
+| --- | --- |
+| `NFSE_TOMADOR_EXTRACTION_SCHEDULE` | `40 7-19/2 * * 1-6` |
+| `NFSE_TOMADOR_TABLE` | `nfse_xml_tomador` |
+| `NFSE_TOMADOR_DOWNLOADS_DIR` | `/usr/local/airflow/data/nfse_tomador` |
+
+```bash
+docker exec -it prj-web-nfs_1f87bb-scheduler-1 \
+  airflow dags trigger extracao_nfse_tomador \
+  --run-id "tomador_manual_202611_$(date +%Y%m%d_%H%M%S)" \
+  --conf '{"competencia":"11/2026"}'
+```
 
 ### Uso pela linha de comando
 
