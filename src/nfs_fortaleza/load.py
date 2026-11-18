@@ -14,6 +14,7 @@ from nfs_fortaleza.nfse_xml import (
     nfse_xml_resource,
 )
 from nfs_fortaleza.periods import DateRangePeriod, MonthPeriod
+from nfs_fortaleza.portal import ListedNfse
 
 
 QueryPeriod = MonthPeriod | DateRangePeriod
@@ -113,3 +114,77 @@ def load_nfse_xml(
     # while its schema history remains in _dlt_version. Reset only this
     # resource so dlt emits the CREATE TABLE before running the merge job.
     return pipeline.run(resource, refresh="drop_resources")
+
+
+def situacao_table_name(table_name: str) -> str:
+    return f"{table_name}_situacao"
+
+
+def upsert_nfse_situacao(
+    settings: Settings,
+    listed: list[ListedNfse],
+    *,
+    table_name: str,
+) -> int:
+    """Grava a situação (NORMAL, CANCELADA...) de cada NFS-e listada no portal.
+
+    O XML exportado não traz o cancelamento e as notas já carregadas não são
+    baixadas de novo; por isso a situação fica numa tabela própria, atualizada
+    a cada consulta.
+    """
+    linhas = {
+        (item.documento, item.numero_nfse): item
+        for item in listed
+        if item.documento and item.numero_nfse and item.situacao
+    }
+    if not linhas:
+        return 0
+    tabela = sql.Identifier(settings.postgres_schema, situacao_table_name(table_name))
+    with psycopg2.connect(settings.database_url) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                sql.SQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS {} (
+                        prestador_cnpj varchar(14) NOT NULL,
+                        numero_nfse varchar(30) NOT NULL,
+                        tomador_cnpj varchar(14),
+                        situacao varchar(40) NOT NULL,
+                        data_emissao date,
+                        primeira_consulta_em timestamptz NOT NULL DEFAULT now(),
+                        atualizado_em timestamptz NOT NULL DEFAULT now(),
+                        situacao_alterada_em timestamptz,
+                        PRIMARY KEY (prestador_cnpj, numero_nfse)
+                    )
+                    """
+                ).format(tabela)
+            )
+            cursor.executemany(
+                sql.SQL(
+                    """
+                    INSERT INTO {} AS t
+                        (prestador_cnpj, numero_nfse, tomador_cnpj, situacao, data_emissao)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (prestador_cnpj, numero_nfse) DO UPDATE SET
+                        tomador_cnpj = COALESCE(EXCLUDED.tomador_cnpj, t.tomador_cnpj),
+                        situacao = EXCLUDED.situacao,
+                        data_emissao = COALESCE(EXCLUDED.data_emissao, t.data_emissao),
+                        atualizado_em = now(),
+                        situacao_alterada_em = CASE
+                            WHEN t.situacao IS DISTINCT FROM EXCLUDED.situacao THEN now()
+                            ELSE t.situacao_alterada_em
+                        END
+                    """
+                ).format(tabela),
+                [
+                    (
+                        item.documento,
+                        item.numero_nfse,
+                        item.inscricao_documento,
+                        item.situacao,
+                        item.data_emissao,
+                    )
+                    for item in linhas.values()
+                ],
+            )
+    return len(linhas)

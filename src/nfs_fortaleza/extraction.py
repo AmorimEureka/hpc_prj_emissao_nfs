@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from nfs_fortaleza.config import Settings
-from nfs_fortaleza.load import load_nfse_xml
+from nfs_fortaleza.load import load_nfse_xml, upsert_nfse_situacao
 from nfs_fortaleza.nfse_xml import infer_nfse_period
 from nfs_fortaleza.periods import (
     DateRangePeriod,
@@ -20,6 +20,7 @@ from nfs_fortaleza.periods import (
 )
 from nfs_fortaleza.portal import (
     VISAO_PRESTADOR,
+    VISAO_TOMADOR,
     PeriodWithoutInvoicesError,
     PortalClient,
     PortalOptions,
@@ -124,12 +125,14 @@ class ExtractionSummary:
     files: tuple[Path, ...]
     loaded_files: int
     empty_periods: tuple[str, ...]
+    situacoes_atualizadas: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "arquivos": [str(path) for path in self.files],
             "arquivos_carregados": self.loaded_files,
             "periodos_sem_notas": list(self.empty_periods),
+            "situacoes_atualizadas": self.situacoes_atualizadas,
         }
 
 
@@ -175,10 +178,17 @@ def extract_and_load_nfse(
             load_nfse_xml(settings, file_path, period, table_name=table_name)
             downloaded.append(file_path)
 
+    situacoes = 0
+    if options.visao == VISAO_TOMADOR and client.listed_nfse:
+        # Inclui as páginas de períodos/inscrições sem XML novo: a situação
+        # de notas antigas (ex.: cancelamento posterior) também é atualizada.
+        situacoes = upsert_nfse_situacao(settings, client.listed_nfse, table_name=table_name)
+
     return ExtractionSummary(
         files=tuple(downloaded),
         loaded_files=len(downloaded),
         empty_periods=tuple(empty_periods),
+        situacoes_atualizadas=situacoes,
     )
 
 
