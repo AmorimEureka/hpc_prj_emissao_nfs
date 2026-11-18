@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 import zipfile
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -70,10 +71,24 @@ class InscricaoRow:
         return f"{self.inscricao} - {self.documento} - {self.nome}"
 
 
+@dataclass(frozen=True)
+class ListedNfse:
+    """Linha da lista de resultados do portal (o XML não traz a situação)."""
+
+    numero_nfse: str
+    documento: str
+    situacao: str
+    data_emissao: date | None
+    inscricao_documento: str | None = None
+
+
 class PortalClient:
     def __init__(self, settings: Settings, options: PortalOptions | None = None) -> None:
         self.settings = settings
         self.options = options or PortalOptions()
+        # Situação de cada NFS-e vista nas páginas de resultado (NORMAL,
+        # CANCELADA, SUBSTITUIDA...). Preenchida por export_competencia.
+        self.listed_nfse: list[ListedNfse] = []
         self.query_date = self.options.query_date or datetime.now(
             ZoneInfo("America/Fortaleza")
         ).date()
@@ -309,6 +324,12 @@ class PortalClient:
                     "carga cancelada para evitar resultado parcial."
                 )
             seen_pages.add(page_key)
+            self.listed_nfse.extend(
+                _extract_listed_nfse(
+                    current_text,
+                    _digits(inscricao.documento) if inscricao else None,
+                )
+            )
 
             for row_position, row_command_id in enumerate(
                 row_command_ids,
@@ -994,6 +1015,71 @@ def _extract_xml_row_command_ids(text: str) -> list[str]:
             continue
         commands[int(match.group("row"))] = match.group("command")
     return [commands[row] for row in sorted(commands)]
+
+
+_LISTED_COLUMNS = {
+    "data de emissao": "data_emissao",
+    "numero da nfs-e": "numero_nfse",
+    "situacao": "situacao",
+    "cpf/cnpj do prestador": "documento",
+    "cpf/cnpj do tomador": "documento",
+}
+
+
+def _fold(value: str) -> str:
+    text = unicodedata.normalize("NFKD", value)
+    return " ".join("".join(c for c in text if not unicodedata.combining(c)).lower().split())
+
+
+def _extract_listed_nfse(text: str, inscricao_documento: str | None = None) -> list[ListedNfse]:
+    """Lê número, situação e CPF/CNPJ de cada linha da tabela de resultados.
+
+    As colunas são localizadas pelo título do cabeçalho
+    (``dataTable:j_idNNNheader``), não pela posição.
+    """
+    decoded = unescape(text)
+    columns: dict[str, str] = {}
+    for jid, label in re.findall(
+        r"id=['\"]consultarnfseForm:dataTable:(j_id\d+)header:sortDiv['\"][^>]*>(.*?)</div>",
+        decoded,
+        flags=re.I | re.S,
+    ):
+        field = _LISTED_COLUMNS.get(_fold(_strip_tags(label)))
+        if field:
+            columns[jid] = field
+    if "numero_nfse" not in columns.values() or "situacao" not in columns.values():
+        return []
+
+    rows: dict[int, dict[str, str]] = {}
+    for row, jid, value in re.findall(
+        r"<td\b[^>]*\bid=['\"]consultarnfseForm:dataTable:(\d+):(j_id\d+)['\"][^>]*>(.*?)</td>",
+        decoded,
+        flags=re.I | re.S,
+    ):
+        field = columns.get(jid)
+        if field:
+            rows.setdefault(int(row), {})[field] = " ".join(_strip_tags(value).split())
+
+    listed: list[ListedNfse] = []
+    for _, cells in sorted(rows.items()):
+        numero = cells.get("numero_nfse", "").strip()
+        situacao = cells.get("situacao", "").strip().upper()
+        if not numero or not situacao:
+            continue
+        try:
+            emissao = datetime.strptime(cells.get("data_emissao", ""), "%d/%m/%Y").date()
+        except ValueError:
+            emissao = None
+        listed.append(
+            ListedNfse(
+                numero_nfse=numero,
+                documento=_digits(cells.get("documento", "")),
+                situacao=situacao,
+                data_emissao=emissao,
+                inscricao_documento=inscricao_documento,
+            )
+        )
+    return listed
 
 
 def _result_page_fingerprint(text: str, view_state: str) -> str:
