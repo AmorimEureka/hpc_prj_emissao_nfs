@@ -411,7 +411,20 @@ def parse_saude_cogestao_pages(
             if not table_rows:
                 continue
             if _is_cogestao_summary(table_rows):
-                summary = _parse_cogestao_summary(table_rows)
+                try:
+                    summary = _parse_cogestao_summary(table_rows)
+                except SpuPortalError:
+                    # Some PDFs expose a page-sized, single-cell table before
+                    # the actual structured summary. Its text contains every
+                    # label, but labels and values are merged in one cell.
+                    # Ignore that extraction artifact and keep looking for the
+                    # structured table that follows on the same page.
+                    LOGGER.debug(
+                        "Resumo SAUDECOGESTAO não estruturado ignorado no "
+                        "documento %s, página %s.",
+                        documento_nome,
+                        page_number,
+                    )
                 continue
 
             start = 0
@@ -730,7 +743,12 @@ def _parse_cogestao_summary(rows: list[list[str]]) -> dict[str, str]:
             "Numero Processo Origem",
         ),
         "competencia_tms": _value_after_label(rows, "Competencia TMS"),
-        "competencia_producao": _value_after_label(rows, "Comp de Producao"),
+        # Some closing reports legitimately leave this field blank. Keep the
+        # protocols and let the normalized record expose ``None`` instead of
+        # rejecting the whole process.
+        "competencia_producao": (
+            _optional_value_after_label(rows, "Comp de Producao") or ""
+        ),
         # Recurso closings (e.g. RECURSOPROTOCOLO) leave this cell blank.
         "data_fechamento": _optional_value_after_label(rows, "Dt Fechamento")
         or "",
