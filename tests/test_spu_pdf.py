@@ -638,3 +638,123 @@ def _document(name: str, document_id: str) -> SpuDocument:
         nome=name,
         path=Path("/tmp") / name,
     )
+
+
+def test_parse_saude_cogestao_ignores_page_sized_table_before_summary() -> None:
+    page_sized_artifact = [[
+        "Fechamento de Processo\n"
+        "Nome Prestador Prontocardio Serviços Medicos Hospitalares Ltda "
+        "Código Prestador 1234567\n"
+        "CNPJ 08.711.085/0001-28\n"
+        "Número Processo P018845/2026 Competência TMS 01/2026 "
+        "Dt Fechamento 05/08/2026\n"
+        "Valor Informado R$ 1.000,00 Valor Glosado R$ 10,00 "
+        "Valor Aprovado R$ 990,00\n"
+        "Comp de Produção 12/2025"
+    ]]
+    structured_summary = [
+        [
+            "Nome Prestador",
+            "Prontocardio Serviços Medicos Hospitalares Ltda",
+            "",
+            "",
+            "Código Prestador",
+            "1234567",
+        ],
+        ["CNPJ", "08.711.085/0001-28", "", "", "", ""],
+        [
+            "Número Processo",
+            "P018845/2026",
+            "Competência TMS",
+            "01/2026",
+            "Dt Fechamento",
+            "05/08/2026",
+        ],
+        [
+            "Valor Informado",
+            "R$ 1.000,00",
+            "Valor Glosado",
+            "R$ 10,00",
+            "Valor Aprovado",
+            "R$ 990,00",
+        ],
+        ["Comp de Produção", "12/2025", "", "", "", ""],
+    ]
+    protocols = [
+        [
+            "NR",
+            "NR Origem",
+            "Tipo de Guia",
+            "Situação",
+            "Qtde. protocolado",
+            "Valor Protocolo",
+            "Valor Glosado",
+            "Valor Aprovado Rev",
+        ],
+        [
+            "1234567",
+            "7654321",
+            "SP / SADT",
+            "Deferido",
+            "1",
+            "R$ 100,00",
+            "R$ 10,00",
+            "R$ 90,00",
+        ],
+    ]
+
+    rows = parse_saude_cogestao_pages(
+        [(1, [page_sized_artifact, structured_summary, protocols], "")],
+        numero_processo="P018845/2026",
+        documento_id="structured-after-artifact",
+        documento_nome="P018845.pdf",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["cnpj"] == "08711085000128"
+    assert rows[0]["nr"] == "1234567"
+    assert rows[0]["valor_aprovado_protocolo"] == Decimal("90.00")
+
+
+def test_parse_saude_cogestao_accepts_blank_production_competence() -> None:
+    summary = [
+        ["Nome Prestador", "Prontocardio", "Código Prestador", "1234567"],
+        ["CNPJ", "08.711.085/0001-28", "", ""],
+        [
+            "Número Processo",
+            "P248911/2026",
+            "Competência TMS",
+            "08/2026",
+            "Dt Fechamento",
+            "05/08/2026",
+        ],
+        [
+            "Valor Informado",
+            "R$ 100,00",
+            "Valor Glosado",
+            "R$ 10,00",
+            "Valor Aprovado",
+            "R$ 90,00",
+        ],
+        ["Comp de Produção", "", "", ""],
+    ]
+    protocols = [
+        [
+            "NR",
+            "Tipo de Guia",
+            "Valor Protocolo",
+            "Valor Glosado",
+            "Valor Aprovado",
+        ],
+        ["1234567", "Resumo Internação", "R$ 100,00", "R$ 10,00", "R$ 90,00"],
+    ]
+
+    rows = parse_saude_cogestao_pages(
+        [(1, [summary, protocols], "")],
+        numero_processo="P248911/2026",
+        documento_id="blank-production",
+        documento_nome="P248911.pdf",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["competencia_producao"] is None
