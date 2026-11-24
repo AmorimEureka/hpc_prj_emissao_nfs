@@ -1,3 +1,4 @@
+import json
 import ast
 from datetime import date
 from decimal import Decimal
@@ -43,7 +44,9 @@ def test_parse_process_detail():
       <tr><td>R$1.580,74</td><td>R$52,32</td></tr>
     </table>
     """
-    assert parse_process_detail(html, "2600003585") == {
+    detalhe = parse_process_detail(html, "2600003585")
+    campos = json.loads(detalhe.pop("campos_detalhe"))
+    assert detalhe == {
         "processo": "2600003585",
         "mes_producao": date(2026, 1, 1),
         "valor_cobrado": Decimal("1633.06"),
@@ -51,6 +54,26 @@ def test_parse_process_detail():
         "valor_servico": Decimal("1580.74"),
         "valor_total_itens_glosados": Decimal("52.32"),
     }
+    assert campos["pares"]["Valor Liberado(R$):"] == "R$1.580,74"
+    assert campos["linhas"][0] == ["Processo:", "Mês de Produção:"]
+
+
+def test_parse_process_detail_guarda_campos_sem_coluna():
+    html = """
+    <table>
+      <tr><th>Processo:</th><th>Mês de Produção:</th></tr>
+      <tr><td>2600003772</td><td>01/01/2026</td></tr>
+      <tr><th>Valor Cobrado(R$):</th><th>Valor Liberado(R$):</th></tr>
+      <tr><td>R$7.190,00</td><td>R$7.190,00</td></tr>
+      <tr><th>IRRF(R$):</th><th>ISS(R$):</th></tr>
+      <tr><td>R$107,85</td><td>R$194,13</td></tr>
+      <tr><td>Observação livre</td></tr>
+    </table>
+    """
+    campos = json.loads(parse_process_detail(html, "2600003772")["campos_detalhe"])
+    assert campos["pares"]["IRRF(R$):"] == "R$107,85"
+    assert campos["pares"]["ISS(R$):"] == "R$194,13"
+    assert ["Observação livre"] in campos["linhas"]
 
 
 def test_select_months_reprocessa_tres_ultimos_e_inclui_ausentes():
