@@ -115,13 +115,24 @@ def parse_process_links(html: str) -> list[tuple[str, str]]:
 def parse_process_detail(html: str, expected_process: str) -> dict:
     rows = parse_html(html).rows
     values: dict[str, str] = {}
+    # Todos os pares rótulo/valor com o rótulo original e as linhas da página:
+    # o detalhe traz outros campos (ex.: impostos) que ainda não têm coluna.
+    pares: dict[str, str] = {}
     for index in range(len(rows) - 1):
-        headers = [normalize_label(cell["text"]) for cell in rows[index]]
+        raw_headers = [cell["text"].strip() for cell in rows[index]]
+        headers = [normalize_label(text) for text in raw_headers]
         next_values = [cell["text"] for cell in rows[index + 1]]
         if not headers or len(headers) != len(next_values):
             continue
-        for label, value in zip(headers, next_values, strict=True):
+        for label, raw, value in zip(headers, raw_headers, next_values, strict=True):
             values[label] = value
+            if raw:
+                pares[raw] = value.strip()
+    linhas = [
+        [cell["text"].strip() for cell in row]
+        for row in rows
+        if any(cell["text"].strip() for cell in row)
+    ]
     processo = values.get("processo", expected_process).strip()
     if processo != expected_process:
         raise IssecPortalError(
@@ -143,6 +154,9 @@ def parse_process_detail(html: str, expected_process: str) -> dict:
         "valor_servico": parse_brl(values.get("valor servico r", "")),
         "valor_total_itens_glosados": parse_brl(
             values.get("valor total de itens glosados", "")
+        ),
+        "campos_detalhe": json.dumps(
+            {"pares": pares, "linhas": linhas}, ensure_ascii=False
         ),
     }
 

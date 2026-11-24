@@ -57,9 +57,13 @@ def extracao_processos_portal_issec():
         try:
             rows = hook.get_records(
                 """
-                SELECT DISTINCT DATE_TRUNC('month', mes_producao)::date
+                SELECT DATE_TRUNC('month', mes_producao)::date
                   FROM raw_issec_portal.processos
                  WHERE mes_producao IS NOT NULL
+                 GROUP BY 1
+                -- Mês só conta como extraído se todos os processos já têm o
+                -- detalhe completo (campos_detalhe); senão é lido de novo.
+                HAVING COUNT(*) = COUNT(campos_detalhe)
                 """
             )
             extracted_months = {row[0] for row in rows}
