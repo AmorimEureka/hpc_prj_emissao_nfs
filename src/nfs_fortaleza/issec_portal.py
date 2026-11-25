@@ -34,6 +34,7 @@ class HtmlPage:
     values_by_id: dict[str, str] = field(default_factory=dict)
     links: list[str] = field(default_factory=list)
     rows: list[list[dict]] = field(default_factory=list)
+    texts: list[str] = field(default_factory=list)
 
 
 class _PortalHtmlParser(HTMLParser):
@@ -70,6 +71,9 @@ class _PortalHtmlParser(HTMLParser):
     def handle_data(self, data: str):
         if self._cell is not None:
             self._cell["text"] += data
+        texto = " ".join(data.split())
+        if texto:
+            self.page.texts.append(texto)
 
 
 def parse_html(html: str) -> HtmlPage:
@@ -112,8 +116,20 @@ def parse_process_links(html: str) -> list[tuple[str, str]]:
     return links
 
 
+# Aviso do detalhe: "Este processo faz parte do grupo com NUP: 46042042895202610".
+# O NUP do grupo identifica o processo agrupador, que recebe a NF do grupo.
+_NUP_GRUPO = re.compile(r"grupo com NUP:?\s*([\d.\-/ ]{15,30}\d)", re.IGNORECASE)
+
+
 def parse_process_detail(html: str, expected_process: str) -> dict:
-    rows = parse_html(html).rows
+    page = parse_html(html)
+    rows = page.rows
+    texto_pagina = " ".join(page.texts)
+    encontrado = _NUP_GRUPO.search(texto_pagina)
+    nup_grupo = re.sub(r"\D", "", encontrado.group(1)) if encontrado else None
+    avisos = [
+        texto for texto in page.texts if "grupo com nup" in texto.lower()
+    ]
     values: dict[str, str] = {}
     # Todos os pares rótulo/valor com o rótulo original e as linhas da página:
     # o detalhe traz outros campos (ex.: impostos) que ainda não têm coluna.
@@ -155,8 +171,10 @@ def parse_process_detail(html: str, expected_process: str) -> dict:
         "valor_total_itens_glosados": parse_brl(
             values.get("valor total de itens glosados", "")
         ),
+        "nup_grupo": nup_grupo,
         "campos_detalhe": json.dumps(
-            {"pares": pares, "linhas": linhas}, ensure_ascii=False
+            {"pares": pares, "linhas": linhas, "avisos": avisos},
+            ensure_ascii=False,
         ),
     }
 

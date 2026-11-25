@@ -46,6 +46,8 @@ def test_parse_process_detail():
     """
     detalhe = parse_process_detail(html, "2600003585")
     campos = json.loads(detalhe.pop("campos_detalhe"))
+    assert detalhe.pop("nup_grupo") is None
+    assert campos["avisos"] == []
     assert detalhe == {
         "processo": "2600003585",
         "mes_producao": date(2026, 1, 1),
@@ -250,3 +252,23 @@ def test_sessao_vazia_e_recusada():
 def test_consulta_sem_login_humano_nao_tenta_autenticar():
     with pytest.raises(IssecPortalError):
         IssecPortalClient("usuario", "senha").list_processes(date(2026, 9, 1))
+
+
+def test_parse_process_detail_le_o_nup_do_grupo():
+    html = """
+    <h2>Relatório de Consulta de Processos: 2600036705</h2>
+    <div class="aviso"><span>&#9888;</span>
+      Este processo faz parte do grupo com NUP: 46042042895202610</div>
+    <table>
+      <tr><th>Processo:</th><th>Mês de Produção:</th></tr>
+      <tr><td>2600036705</td><td>01/08/2026</td></tr>
+      <tr><th>Valor Cobrado(R$):</th><th>Valor Liberado(R$):</th></tr>
+      <tr><td>R$2.118,58</td><td>R$2.118,58</td></tr>
+    </table>
+    """
+    detalhe = parse_process_detail(html, "2600036705")
+    assert detalhe["nup_grupo"] == "46042042895202610"
+    campos = json.loads(detalhe["campos_detalhe"])
+    assert campos["avisos"] == [
+        "Este processo faz parte do grupo com NUP: 46042042895202610"
+    ]

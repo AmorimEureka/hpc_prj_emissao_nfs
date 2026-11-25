@@ -62,8 +62,11 @@ def extracao_processos_portal_issec():
                  WHERE mes_producao IS NOT NULL
                  GROUP BY 1
                 -- Mês só conta como extraído se todos os processos já têm o
-                -- detalhe completo (campos_detalhe); senão é lido de novo.
-                HAVING COUNT(*) = COUNT(campos_detalhe)
+                -- detalhe completo (campos_detalhe com os avisos da página,
+                -- de onde vem o NUP do grupo); senão é lido de novo.
+                HAVING COUNT(*) = COUNT(*) FILTER (
+                    WHERE campos_detalhe LIKE '%"avisos"%'
+                )
                 """
             )
             extracted_months = {row[0] for row in rows}
