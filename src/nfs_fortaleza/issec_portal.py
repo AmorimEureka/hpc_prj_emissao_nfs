@@ -193,10 +193,15 @@ def month_range(start: date, end: date) -> list[date]:
     return result
 
 
+# Primeira competência lida do portal: a mesma das remessas que o Receita
+# Certa acompanha (MV desde 01/2025), para conferir os protocolos de 2025.
+PRIMEIRA_COMPETENCIA = date(2025, 1, 1)
+
+
 def select_months_to_scrape(
     today: date,
     extracted_months: set[date],
-    start: date = date(2026, 1, 1),
+    start: date = PRIMEIRA_COMPETENCIA,
 ) -> list[date]:
     available = month_range(start, today)
     refresh = set(available[-3:])
