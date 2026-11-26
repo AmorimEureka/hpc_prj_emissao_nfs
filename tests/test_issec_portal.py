@@ -142,6 +142,11 @@ def test_carga_mantem_pipeline_e_tabela_lidos_pela_api(monkeypatch):
         lambda **kwargs: kwargs,
     )
     monkeypatch.delenv("DESTINATION__POSTGRES__CREDENTIALS", raising=False)
+    notas = {"pendentes": [], "pagas": [{"nup": "1", "extraido_em": "agora"}], "processos": []}
+    monkeypatch.setattr(
+        "nfs_fortaleza.issec_notas_fiscais.NotasFiscaisIssec.ler",
+        lambda self, conhecidas: calls.setdefault("notas", notas),
+    )
 
     result = extract_and_load_processos(
         username="usuario",
@@ -163,20 +168,30 @@ def test_carga_mantem_pipeline_e_tabela_lidos_pela_api(monkeypatch):
         date(2026, 10, 1),
         date(2026, 11, 1),
     ]
-    assert result == {"competencias": ["09/2026", "10/2026", "11/2026"]}
+    assert calls["source"]["notas_fiscais"] is notas
+    assert notas["pagas"][0]["primeira_extracao_em"] == "agora"
+    assert result["competencias"] == ["09/2026", "10/2026", "11/2026"]
+    assert result["notas_fiscais"] == {"pendentes": 0, "a_enviar": 0, "pagas": 1, "processos_de_grupos": 0}
     assert issec_portal.os.environ["DESTINATION__POSTGRES__CREDENTIALS"] == (
         "postgresql://destino"
     )
 
 
-def test_sem_meses_pendentes_nao_abre_pipeline(monkeypatch):
+def test_sem_meses_pendentes_ainda_le_as_notas_fiscais(monkeypatch):
+    # As notas fiscais mudam todo dia: o login é pedido mesmo sem mês a ler.
     monkeypatch.setattr(issec_portal, "select_months_to_scrape", lambda *a: [])
-    login = []
+    login, carregado = [], {}
     monkeypatch.setattr(
-        issec_portal.dlt,
-        "pipeline",
-        lambda **kwargs: pytest.fail("não deveria carregar"),
+        "nfs_fortaleza.issec_notas_fiscais.NotasFiscaisIssec.ler",
+        lambda self, conhecidas: {"pendentes": [], "pagas": [], "processos": []},
     )
+
+    class FakePipeline:
+        def run(self, source):
+            carregado["source"] = source
+
+    monkeypatch.setattr(issec_portal.dlt, "pipeline", lambda **kw: FakePipeline())
+    monkeypatch.setattr(issec_portal, "portal_issec_source", lambda **kwargs: kwargs)
 
     result = extract_and_load_processos(
         username="usuario",
@@ -186,9 +201,9 @@ def test_sem_meses_pendentes_nao_abre_pipeline(monkeypatch):
         authenticate=login.append,
     )
 
-    assert result == {"competencias": []}
-    assert login == []
-
+    assert len(login) == 1
+    assert carregado["source"]["months"] == []
+    assert result["competencias"] == []
 
 def test_dag_declara_id_agenda_e_conexao_oficial():
     source = (
