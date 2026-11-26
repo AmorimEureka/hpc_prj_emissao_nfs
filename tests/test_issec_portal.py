@@ -78,8 +78,23 @@ def test_parse_process_detail_guarda_campos_sem_coluna():
     assert ["Observação livre"] in campos["linhas"]
 
 
+def test_select_months_comeca_em_2025():
+    """Os protocolos de 2025 também são conferidos pelo portal (pedido de 26/11/2026)."""
+    jan_2025_a_dez_2025 = {date(2025, m, 1) for m in range(1, 13)}
+    meses = select_months_to_scrape(date(2026, 2, 10), set())
+    assert meses[0] == date(2025, 1, 1)
+    assert len(meses) == 14
+    # Já extraídos: só os ausentes e os três últimos (reprocessados).
+    assert select_months_to_scrape(date(2026, 2, 10), jan_2025_a_dez_2025) == [
+        date(2025, 12, 1),
+        date(2026, 1, 1),
+        date(2026, 2, 1),
+    ]
+
+
 def test_select_months_reprocessa_tres_ultimos_e_inclui_ausentes():
     extracted = {
+        *{date(2025, m, 1) for m in range(1, 13)},
         date(2026, 1, 1),
         date(2026, 2, 1),
         date(2026, 4, 1),
@@ -152,7 +167,7 @@ def test_carga_mantem_pipeline_e_tabela_lidos_pela_api(monkeypatch):
         username="usuario",
         password="senha",
         database_url="postgresql://destino",
-        extracted_months=set(issec_portal.month_range(date(2026, 1, 1), date(2026, 8, 1))),
+        extracted_months=set(issec_portal.month_range(date(2025, 1, 1), date(2026, 8, 1))),
         authenticate=lambda client: calls.setdefault("client", client),
         today=date(2026, 11, 5),
     )
