@@ -429,8 +429,12 @@ class IssecPortalClient:
 
 
 @dlt.source(name="portal_issec")
-def portal_issec_source(*, client: Any, months: list[date]):
-    """Fonte dlt que percorre os meses com uma sessão já autenticada."""
+def portal_issec_source(*, client: Any, months: list[date], notas_fiscais: dict | None = None):
+    """Fonte dlt que percorre os meses com uma sessão já autenticada.
+
+    ``notas_fiscais``: leitura da página Notas Fiscais (pendentes, pagas e
+    processos dos grupos), carregada em tabelas próprias.
+    """
 
     @dlt.resource(
         name="processos",
@@ -441,7 +445,36 @@ def portal_issec_source(*, client: Any, months: list[date]):
         for month in months:
             yield from client.scrape_month(month)
 
-    return processos
+    if notas_fiscais is None:
+        return processos
+
+    # Pendentes é uma foto: o que saiu da lista foi pago ou recusado.
+    @dlt.resource(name="notas_fiscais_pendentes", write_disposition="replace")
+    def notas_fiscais_pendentes():
+        yield from notas_fiscais["pendentes"]
+
+    @dlt.resource(
+        name="notas_fiscais_pagas",
+        primary_key="nup",
+        write_disposition="merge",
+    )
+    def notas_fiscais_pagas():
+        yield from notas_fiscais["pagas"]
+
+    @dlt.resource(
+        name="notas_fiscais_processos",
+        primary_key=("nup_grupo", "processo"),
+        write_disposition="merge",
+    )
+    def notas_fiscais_processos():
+        yield from notas_fiscais["processos"]
+
+    return (
+        processos,
+        notas_fiscais_pendentes,
+        notas_fiscais_pagas,
+        notas_fiscais_processos,
+    )
 
 
 def extract_and_load_processos(
@@ -455,17 +488,24 @@ def extract_and_load_processos(
     base_url: str = DEFAULT_BASE_URL,
     timeout: int = 30,
     max_workers: int = 4,
-) -> dict[str, list[str]]:
-    """Carrega os meses pendentes em ``raw_issec_portal.processos``.
+    pagas_conhecidas: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Carrega os meses pendentes em ``raw_issec_portal.processos`` e a página
+    Notas Fiscais em ``notas_fiscais_*`` (pendentes, pagas e processos dos grupos).
 
-    A API lê essa tabela pelo nome; pipeline e dataset não podem mudar sem
-    migrar também o consumidor e o estado dlt já gravado. O login só é pedido
-    quando há mês a consultar.
+    A API lê essas tabelas pelo nome; pipeline e dataset não podem mudar sem
+    migrar também o consumidor e o estado dlt já gravado. O login é pedido em
+    toda execução: as notas fiscais mudam todo dia.
+
+    ``pagas_conhecidas``: NUP -> quando a nota apareceu paga pela primeira vez
+    (o portal não informa a data do pagamento). Grupos pagos já conhecidos não
+    são detalhados de novo.
     """
+    # Import local: issec_notas_fiscais importa este módulo.
+    from nfs_fortaleza.issec_notas_fiscais import NotasFiscaisIssec  # noqa: PLC0415
 
+    pagas_conhecidas = pagas_conhecidas or {}
     months = select_months_to_scrape(today or date.today(), extracted_months)
-    if not months:
-        return {"competencias": []}
     client = IssecPortalClient(
         username=username,
         password=password,
@@ -474,11 +514,22 @@ def extract_and_load_processos(
         max_workers=max_workers,
     )
     authenticate(client)
+    notas = NotasFiscaisIssec(client, max_workers=max_workers).ler(set(pagas_conhecidas))
+    for paga in notas["pagas"]:
+        paga["primeira_extracao_em"] = pagas_conhecidas.get(paga["nup"]) or paga["extraido_em"]
     os.environ["DESTINATION__POSTGRES__CREDENTIALS"] = database_url
     pipeline = dlt.pipeline(
         pipeline_name="portal_issec_processos",
         dataset_name="raw_issec_portal",
         destination="postgres",
     )
-    pipeline.run(portal_issec_source(client=client, months=months))
-    return {"competencias": [month.strftime("%m/%Y") for month in months]}
+    pipeline.run(portal_issec_source(client=client, months=months, notas_fiscais=notas))
+    return {
+        "competencias": [month.strftime("%m/%Y") for month in months],
+        "notas_fiscais": {
+            "pendentes": len(notas["pendentes"]),
+            "a_enviar": sum(1 for p in notas["pendentes"] if p["nf_a_enviar"]),
+            "pagas": len(notas["pagas"]),
+            "processos_de_grupos": len(notas["processos"]),
+        },
+    }

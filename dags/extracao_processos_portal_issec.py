@@ -26,8 +26,8 @@ AUTH_TIMEOUT_SECONDS = float(os.getenv("ISSEC_AUTH_TIMEOUT_SECONDS", "1800"))
 @dag(
     dag_id="extracao_processos_portal_issec",
     description=(
-        "Extrai os processos do portal do credenciado ISSEC e carrega "
-        "raw_issec_portal.processos com dlt."
+        "Extrai os processos e a página Notas Fiscais (pendentes e pagas) do "
+        "portal do credenciado ISSEC e carrega raw_issec_portal com dlt."
     ),
     # Horário comercial: o login depende de um usuário resolver o captcha.
     schedule=os.getenv("ISSEC_PORTAL_SCHEDULE", "0 8 * * 1-5"),
@@ -46,7 +46,7 @@ AUTH_TIMEOUT_SECONDS = float(os.getenv("ISSEC_AUTH_TIMEOUT_SECONDS", "1800"))
 def extracao_processos_portal_issec():
     # O pool evita dois desafios de captcha ao mesmo tempo no desktop remoto.
     @task(task_id="extrair_e_carregar", pool="nfse_portal")
-    def extrair_e_carregar() -> dict[str, list[str]]:
+    def extrair_e_carregar() -> dict:
         context = get_current_context()
         metadata = {
             "dag_id": context["task_instance"].dag_id,
@@ -73,6 +73,18 @@ def extracao_processos_portal_issec():
         except Exception:
             # Primeira execução: o dlt ainda criará schema e tabela.
             extracted_months = set()
+        try:
+            # Quando cada nota apareceu paga pela primeira vez (o portal não
+            # informa a data do pagamento) e quais grupos já foram detalhados.
+            pagas_conhecidas = {
+                row[0]: row[1]
+                for row in hook.get_records(
+                    "SELECT nup, primeira_extracao_em::text"
+                    "  FROM raw_issec_portal.notas_fiscais_pagas"
+                )
+            }
+        except Exception:
+            pagas_conhecidas = {}
 
         try:
             return extract_and_load_processos(
@@ -88,6 +100,7 @@ def extracao_processos_portal_issec():
                 base_url=os.getenv("ISSEC_PORTAL_URL", DEFAULT_BASE_URL),
                 timeout=int(os.getenv("ISSEC_PORTAL_TIMEOUT", "30")),
                 max_workers=int(os.getenv("ISSEC_PORTAL_WORKERS", "4")),
+                pagas_conhecidas=pagas_conhecidas,
             )
         except IssecInteractiveAuthError as auth_error:
             # Sem retry: outra tentativa só abriria um novo desafio sem ninguém.
