@@ -85,6 +85,29 @@ def extracao_processos_portal_issec():
             }
         except Exception:
             pagas_conhecidas = {}
+        try:
+            # Protocolos já registrados no Receita Certa (ISSEC) que ainda não
+            # estão nos processos com mês de produção: processos "Em Análise"
+            # não aparecem na busca por período, só na busca por número. O
+            # número é só a chave de busca; a API confirma o vínculo pelo valor.
+            processos_por_numero = [
+                row[0]
+                for row in hook.get_records(
+                    """
+                    SELECT DISTINCT p.numero
+                      FROM api_prontocardio.cr_protocolos p
+                      JOIN api_prontocardio.cr_protocolo_remessas pr ON pr.protocolo_id = p.id
+                     WHERE p.cd_convenio = 46
+                       AND p.numero ~ '^[0-9]{10}$'
+                       AND NOT EXISTS (
+                           SELECT 1 FROM raw_issec_portal.processos x
+                            WHERE x.processo = p.numero AND x.mes_producao IS NOT NULL)
+                     ORDER BY 1
+                    """
+                )
+            ]
+        except Exception:
+            processos_por_numero = []
 
         try:
             return extract_and_load_processos(
@@ -101,6 +124,7 @@ def extracao_processos_portal_issec():
                 timeout=int(os.getenv("ISSEC_PORTAL_TIMEOUT", "30")),
                 max_workers=int(os.getenv("ISSEC_PORTAL_WORKERS", "4")),
                 pagas_conhecidas=pagas_conhecidas,
+                processos_por_numero=processos_por_numero,
             )
         except IssecInteractiveAuthError as auth_error:
             # Sem retry: outra tentativa só abriria um novo desafio sem ninguém.

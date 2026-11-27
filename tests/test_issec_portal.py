@@ -302,3 +302,73 @@ def test_parse_process_detail_le_o_nup_do_grupo():
     assert campos["avisos"] == [
         "Este processo faz parte do grupo com NUP: 46042042895202610"
     ]
+
+
+EM_ANALISE_HTML = """
+<table>
+  <tr><th>Processo:</th><th>Cidade:</th><th>Mês de Produção:</th><th>Entrada no Protocolo:</th><th>Tipo:</th></tr>
+  <tr><td>2600041925</td><td></td><td></td><td></td><td></td></tr>
+  <tr><th>Valor Cobrado(R$):</th><th>Valor Liberado(R$):</th><th>Situação:</th><th>Motivo da Situação:</th></tr>
+  <tr><td>R$9.828,44</td><td></td><td></td><td>Em Análise</td></tr>
+</table>
+"""
+
+
+def test_detalhe_em_analise_sem_mes_de_producao():
+    """Caso 2600041925 (remessa 20618): o portal só preenche o mês depois da análise."""
+    with pytest.raises(IssecPortalError):
+        parse_process_detail(EM_ANALISE_HTML, "2600041925")
+
+    detalhe = parse_process_detail(EM_ANALISE_HTML, "2600041925", exigir_mes_producao=False)
+    assert detalhe["mes_producao"] is None
+    assert detalhe["valor_cobrado"] == Decimal("9828.44")
+    assert detalhe["valor_liberado"] is None
+    assert json.loads(detalhe["campos_detalhe"])["pares"]["Motivo da Situação:"] == "Em Análise"
+
+
+def test_busca_por_numero_le_o_processo_em_analise(monkeypatch):
+    client = IssecPortalClient("usuario", "senha")
+    client.session_id = "1"
+    consulta = issec_portal.HtmlPage()
+
+    class Resposta:
+        def __init__(self, texto="", redirect=""):
+            self.text, self._redirect = texto, redirect
+
+        def json(self):
+            return {"redirectURL": self._redirect}
+
+    enviados = []
+    monkeypatch.setattr(issec_portal, "parse_html", lambda html: consulta if html == "consulta" else issec_portal.HtmlPage())
+    monkeypatch.setattr(client, "_get", lambda path: Resposta("consulta" if "consulta" in path else EM_ANALISE_HTML))
+    monkeypatch.setattr(client, "_submit", lambda page, request, items, referer: enviados.append((request, items)) or Resposta(
+        redirect="javascript:apex.theme42.dialog('/ords/r/aplicacoes/portal-credenciado/relnumproc?nu_proc=2600041925&session=1')"))
+    monkeypatch.setattr(issec_portal, "parse_process_detail", lambda html, numero, exigir_mes_producao=True: {
+        "processo": numero, "mes_producao": None, "valor_cobrado": Decimal("9828.44"), "valor_liberado": None})
+
+    row = client.lookup_process("2600041925")
+
+    assert enviados == [("bt-PesqNum", [("P19_NU_PROC", "2600041925"), ("P19_PROCMES", ""), ("P19_PROCANO", "")])]
+    assert row["processo"] == "2600041925"
+    assert row["competencia"] is None
+
+
+def test_fonte_le_por_numero_os_registrados_fora_da_busca_por_periodo():
+    class FakeClient:
+        def scrape_month(self, month):
+            return [{"processo": "2600000001", "mes_producao": month}]
+
+        def lookup_process(self, numero):
+            if numero == "2600099999":
+                return None
+            return {"processo": numero, "mes_producao": None}
+
+    resumo = {}
+    source = portal_issec_source(
+        client=FakeClient(), months=[date(2026, 10, 1)], notas_fiscais={"pendentes": [], "pagas": [], "processos": []},
+        processos_por_numero=["2600000001", "2600041925", "2600099999"], resumo_por_numero=resumo,
+    )
+    rows = list(source.resources["processos"])
+
+    assert [r["processo"] for r in rows] == ["2600000001", "2600041925"]
+    assert resumo == {"consultados": 2, "encontrados": 1, "em_analise": 1}

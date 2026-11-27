@@ -121,7 +121,15 @@ def parse_process_links(html: str) -> list[tuple[str, str]]:
 _NUP_GRUPO = re.compile(r"grupo com NUP:?\s*([\d.\-/ ]{15,30}\d)", re.IGNORECASE)
 
 
-def parse_process_detail(html: str, expected_process: str) -> dict:
+def parse_process_detail(
+    html: str, expected_process: str, *, exigir_mes_producao: bool = True
+) -> dict:
+    """Detalhe do processo.
+
+    ``exigir_mes_producao=False``: processo "Em Análise" (busca por número), em
+    que o portal ainda não preencheu mês de produção, entrada nem valor
+    liberado; esses campos ficam None.
+    """
     page = parse_html(html)
     rows = page.rows
     texto_pagina = " ".join(page.texts)
@@ -159,14 +167,20 @@ def parse_process_detail(html: str, expected_process: str) -> dict:
             values["mes de producao"], "%d/%m/%Y"
         ).date()
     except (KeyError, ValueError) as exc:
-        raise IssecPortalError(
-            f"Mês de produção ausente ou inválido no processo {processo}."
-        ) from exc
+        if exigir_mes_producao or values.get("mes de producao", "").strip():
+            raise IssecPortalError(
+                f"Mês de produção ausente ou inválido no processo {processo}."
+            ) from exc
+        mes_producao = None
     return {
         "processo": processo,
         "mes_producao": mes_producao,
         "valor_cobrado": parse_brl(values.get("valor cobrado r", "")),
-        "valor_liberado": parse_brl(values.get("valor liberado r", "")),
+        "valor_liberado": (
+            parse_brl(values.get("valor liberado r", ""))
+            if exigir_mes_producao or values.get("valor liberado r", "").strip()
+            else None
+        ),
         "valor_servico": parse_brl(values.get("valor servico r", "")),
         "valor_total_itens_glosados": parse_brl(
             values.get("valor total de itens glosados", "")
@@ -422,6 +436,39 @@ class IssecPortalClient:
         response.raise_for_status()
         return parse_process_detail(response.text, process)
 
+    def lookup_process(self, numero: str) -> dict | None:
+        """Processo pela busca por número (bt-PesqNum).
+
+        A busca por período filtra pelo mês de produção, que o portal só
+        preenche depois da análise: processos "Em Análise" só aparecem assim.
+        Retorna None se o portal não tiver o processo.
+        """
+        if not self.session_id:
+            raise IssecPortalError("Sessão do portal ISSEC não autenticada.")
+        consulta_path = f"{CONSULTA_PATH}?session={self.session_id}"
+        page = parse_html(self._get(consulta_path).text)
+        response = self._submit(
+            page,
+            "bt-PesqNum",
+            [("P19_NU_PROC", numero), ("P19_PROCMES", ""), ("P19_PROCANO", "")],
+            urljoin(self.base_url, consulta_path),
+        )
+        redirect = response.json().get("redirectURL", "")
+        if "relnumproc" not in redirect:
+            return None
+        html = self._get(extract_dialog_path(redirect, "relnumproc")).text
+        try:
+            row = parse_process_detail(html, numero, exigir_mes_producao=False)
+        except IssecPortalError:
+            return None
+        if not row["valor_cobrado"]:
+            return None
+        row["competencia"] = (
+            row["mes_producao"].strftime("%m/%Y") if row["mes_producao"] else None
+        )
+        row["extraido_em"] = datetime.now().astimezone().isoformat()
+        return row
+
     def scrape_month(self, month: date) -> list[dict]:
         links = self.list_processes(month)
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -434,8 +481,19 @@ class IssecPortalClient:
 
 
 @dlt.source(name="portal_issec")
-def portal_issec_source(*, client: Any, months: list[date], notas_fiscais: dict | None = None):
+def portal_issec_source(
+    *,
+    client: Any,
+    months: list[date],
+    notas_fiscais: dict | None = None,
+    processos_por_numero: list[str] | None = None,
+    resumo_por_numero: dict | None = None,
+):
     """Fonte dlt que percorre os meses com uma sessão já autenticada.
+
+    ``processos_por_numero``: protocolos já registrados no Receita Certa que
+    não estão nos processos com mês de produção (ex.: "Em Análise"); são
+    lidos pela busca por número. ``resumo_por_numero`` recebe as contagens.
 
     ``notas_fiscais``: leitura da página Notas Fiscais (pendentes, pagas e
     processos dos grupos), carregada em tabelas próprias.
@@ -447,8 +505,23 @@ def portal_issec_source(*, client: Any, months: list[date], notas_fiscais: dict 
         write_disposition="merge",
     )
     def processos():
+        vistos = set()
         for month in months:
-            yield from client.scrape_month(month)
+            for row in client.scrape_month(month):
+                vistos.add(row["processo"])
+                yield row
+        resumo = resumo_por_numero if resumo_por_numero is not None else {}
+        resumo.update(consultados=0, encontrados=0, em_analise=0)
+        for numero in processos_por_numero or []:
+            if numero in vistos:
+                continue
+            resumo["consultados"] += 1
+            row = client.lookup_process(numero)
+            if row is None:
+                continue
+            resumo["encontrados"] += 1
+            resumo["em_analise"] += row["mes_producao"] is None
+            yield row
 
     if notas_fiscais is None:
         return processos
@@ -494,6 +567,7 @@ def extract_and_load_processos(
     timeout: int = 30,
     max_workers: int = 4,
     pagas_conhecidas: dict[str, str] | None = None,
+    processos_por_numero: list[str] | None = None,
 ) -> dict[str, Any]:
     """Carrega os meses pendentes em ``raw_issec_portal.processos`` e a página
     Notas Fiscais em ``notas_fiscais_*`` (pendentes, pagas e processos dos grupos).
@@ -505,6 +579,9 @@ def extract_and_load_processos(
     ``pagas_conhecidas``: NUP -> quando a nota apareceu paga pela primeira vez
     (o portal não informa a data do pagamento). Grupos pagos já conhecidos não
     são detalhados de novo.
+
+    ``processos_por_numero``: protocolos registrados ainda sem mês de produção
+    no portal, lidos pela busca por número (processos "Em Análise").
     """
     # Import local: issec_notas_fiscais importa este módulo.
     from nfs_fortaleza.issec_notas_fiscais import NotasFiscaisIssec  # noqa: PLC0415
@@ -528,9 +605,19 @@ def extract_and_load_processos(
         dataset_name="raw_issec_portal",
         destination="postgres",
     )
-    pipeline.run(portal_issec_source(client=client, months=months, notas_fiscais=notas))
+    por_numero: dict = {}
+    pipeline.run(
+        portal_issec_source(
+            client=client,
+            months=months,
+            notas_fiscais=notas,
+            processos_por_numero=processos_por_numero,
+            resumo_por_numero=por_numero,
+        )
+    )
     return {
         "competencias": [month.strftime("%m/%Y") for month in months],
+        "processos_por_numero": por_numero,
         "notas_fiscais": {
             "pendentes": len(notas["pendentes"]),
             "a_enviar": sum(1 for p in notas["pendentes"] if p["nf_a_enviar"]),
