@@ -64,8 +64,11 @@ def extracao_processos_portal_issec():
                 -- Mês só conta como extraído se todos os processos já têm o
                 -- detalhe completo (campos_detalhe com os avisos da página,
                 -- de onde vem o NUP do grupo); senão é lido de novo.
+                -- Também precisa das guias ("Detalhes de Contas"), lidas desde
+                -- 27/11/2026: a primeira execução relê os meses uma vez.
                 HAVING COUNT(*) = COUNT(*) FILTER (
                     WHERE campos_detalhe LIKE '%"avisos"%'
+                      AND to_jsonb(processos) ->> 'guias' IS NOT NULL
                 )
                 """
             )

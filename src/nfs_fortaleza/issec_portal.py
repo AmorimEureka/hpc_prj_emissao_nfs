@@ -116,6 +116,40 @@ def parse_process_links(html: str) -> list[tuple[str, str]]:
     return links
 
 
+# Guias do processo ("Detalhes de Contas"): data | senha da guia (9 caracteres,
+# a mesma de GUIA.CD_SENHA no MV) | beneficiário | procedimento | qtde | valor.
+# O beneficiário (3ª coluna) é descartado pela posição e nunca é gravado.
+_SENHA_GUIA = re.compile(r"^[0-9A-Z]{9}$")
+_PAGINA_CONTAS = re.compile(r"portal-credenciado/([a-z0-9\-]*conta[a-z0-9\-]*)\?")
+
+
+def contas_paths(html: str) -> list[str]:
+    """Caminhos das páginas "Detalhes de Contas" citadas no detalhe do processo."""
+    texto = html.replace("&#x5C;", "\\").replace("&#x27;", "'").replace("&amp;", "&")
+    texto = (
+        texto.replace("\\u002F", "/").replace("\\u0026", "&").replace("\\u0025", "%")
+    )
+    caminhos = re.findall(
+        r"/ords/(r/aplicacoes/portal-credenciado/[a-z0-9\-]+\?[^'\"\s]+)", texto
+    )
+    return sorted({c for c in caminhos if _PAGINA_CONTAS.search(c)})
+
+
+def parse_guias(html: str) -> list[dict]:
+    guias = []
+    for row in parse_html(html).rows:
+        cel = [cell["text"].strip() for cell in row]
+        if len(cel) >= 6 and _SENHA_GUIA.match(cel[1]):
+            guias.append({
+                "senha": cel[1],
+                "data": cel[0].rstrip("."),
+                "procedimento": cel[3].split("-", 1)[0].strip(),
+                "qtd": cel[4],
+                "valor": str(parse_brl(cel[5])),
+            })
+    return guias
+
+
 # Aviso do detalhe: "Este processo faz parte do grupo com NUP: 46042042895202610".
 # O NUP do grupo identifica o processo agrupador, que recebe a NF do grupo.
 _NUP_GRUPO = re.compile(r"grupo com NUP:?\s*([\d.\-/ ]{15,30}\d)", re.IGNORECASE)
@@ -434,7 +468,19 @@ class IssecPortalClient:
         session.cookies.update(self.session.cookies)
         response = session.get(urljoin(self.base_url, path), timeout=self.timeout)
         response.raise_for_status()
-        return parse_process_detail(response.text, process)
+        row = parse_process_detail(response.text, process)
+        row["guias"] = self._guias(response.text, session)
+        return row
+
+    def _guias(self, detalhe_html: str, session: requests.Session | None = None) -> str:
+        """Guias das páginas "Detalhes de Contas" (JSON; "[]" quando não há)."""
+        session = session or self.session
+        guias = []
+        for path in contas_paths(detalhe_html):
+            response = session.get(urljoin(self.base_url, path), timeout=self.timeout)
+            response.raise_for_status()
+            guias += parse_guias(response.text)
+        return json.dumps(guias)
 
     def lookup_process(self, numero: str) -> dict | None:
         """Processo pela busca por número (bt-PesqNum).
@@ -461,6 +507,7 @@ class IssecPortalClient:
             row = parse_process_detail(html, numero, exigir_mes_producao=False)
         except IssecPortalError:
             return None
+        row["guias"] = self._guias(html)
         if not row["valor_cobrado"]:
             return None
         row["competencia"] = (
