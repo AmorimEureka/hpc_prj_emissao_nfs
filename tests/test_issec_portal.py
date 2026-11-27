@@ -8,6 +8,8 @@ import pytest
 
 from nfs_fortaleza import issec_portal
 from nfs_fortaleza.issec_portal import (
+    contas_paths,
+    parse_guias,
     IssecPortalClient,
     IssecPortalError,
     extract_and_load_processos,
@@ -372,3 +374,64 @@ def test_fonte_le_por_numero_os_registrados_fora_da_busca_por_periodo():
 
     assert [r["processo"] for r in rows] == ["2600000001", "2600041925"]
     assert resumo == {"consultados": 2, "encontrados": 1, "em_analise": 1}
+
+
+DETALHE_COM_CONTAS = (
+    "<button onclick=\"apex.theme42.dialog('&#x5C;u002Fords&#x5C;u002Fr&#x5C;u002Faplicacoes"
+    "&#x5C;u002Fportal-credenciado&#x5C;u002Fdetalhe-de-contas-geral?p34_nu_ordem=2600002999"
+    "&#x5C;u0026p34_tp_tratamento=EXAMES&#x5C;u002520RADIOLOGICOS&#x5C;u0026session=1&#x5C;u0026cs=abc',{})\">"
+    "Detalhes de Contas</button>"
+    "<button onclick=\"apex.theme42.dialog('&#x5C;u002Fords&#x5C;u002Fr&#x5C;u002Faplicacoes"
+    "&#x5C;u002Fportal-credenciado&#x5C;u002Fdetalhamento-de-grupo?p46_nu_grupo=1&#x5C;u0026session=1',{})\">"
+    "Grupo</button>"
+)
+
+# Nomes fictícios: a coluna do beneficiário nunca pode ser gravada.
+CONTAS_HTML = """
+<table>
+  <tr><td></td><td>(Qtde)</td><td>Valor(R$)</td></tr>
+  <tr><td>01/12/2025.</td><td>0057P2P18</td><td>FULANO DE TAL-00000000000</td><td>40808033-RX TORAX</td><td>1</td><td>15,59</td></tr>
+  <tr><td>01/12/2025.</td><td>0052ZDQIF</td><td>BELTRANA DE TAL-00000000001</td><td>40808041-RX OUTRO</td><td>1</td><td>16,16</td></tr>
+  <tr><td>Total de Procedimentos:</td><td>2</td><td>R$ 31,75</td></tr>
+</table>
+"""
+
+
+def test_paginas_de_contas_do_detalhe():
+    assert contas_paths(DETALHE_COM_CONTAS) == [
+        "r/aplicacoes/portal-credenciado/detalhe-de-contas-geral?p34_nu_ordem=2600002999"
+        "&p34_tp_tratamento=EXAMES%20RADIOLOGICOS&session=1&cs=abc"
+    ]
+
+
+def test_guias_sem_o_beneficiario():
+    guias = parse_guias(CONTAS_HTML)
+    assert guias == [
+        {"senha": "0057P2P18", "data": "01/12/2025", "procedimento": "40808033", "qtd": "1", "valor": "15.59"},
+        {"senha": "0052ZDQIF", "data": "01/12/2025", "procedimento": "40808041", "qtd": "1", "valor": "16.16"},
+    ]
+    assert "FULANO" not in json.dumps(guias)
+
+
+def test_detalhe_grava_as_guias_em_json(monkeypatch):
+    client = IssecPortalClient("usuario", "senha")
+
+    class Resposta:
+        def __init__(self, texto):
+            self.text = texto
+
+        def raise_for_status(self):
+            return None
+
+    class Sessao:
+        cookies = {}
+
+        def get(self, url, timeout):
+            return Resposta(CONTAS_HTML if "contas" in url else DETALHE_COM_CONTAS)
+
+    monkeypatch.setattr(client, "_new_session", Sessao)
+    monkeypatch.setattr(issec_portal, "parse_process_detail", lambda html, numero: {"processo": numero})
+
+    row = client._detail(("2600002999", "/detalhe"))
+
+    assert [g["senha"] for g in json.loads(row["guias"])] == ["0057P2P18", "0052ZDQIF"]
