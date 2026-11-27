@@ -74,7 +74,15 @@ def parse_notas_pendentes(html: str) -> list[dict]:
         if "NU_NUP" not in celulas or "NU_ORDEM" not in celulas:
             continue
         enviar = _texto(celulas.get("DERIVED$01", ""))
-        detalhe = _caminho_detalhe(celulas.get("DERIVED$03", ""))
+        # O portal deixa o link do detalhe na célula mesmo sem processos
+        # agrupados; agrupado é só a linha com o texto ANALISAR (27/11/2026:
+        # 2600044480 e 2600041559 vinham marcados como agrupados).
+        coluna_grupo = celulas.get("DERIVED$03", "")
+        detalhe = (
+            _caminho_detalhe(coluna_grupo)
+            if "ANALISAR" in _texto(coluna_grupo).upper()
+            else None
+        )
         linhas.append({
             "nup": _digitos(_texto(celulas["NU_NUP"])),
             "processo": _digitos(_texto(celulas["NU_ORDEM"])),

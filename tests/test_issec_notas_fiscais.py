@@ -19,7 +19,8 @@ ENVIAR = "&#x5C;u002Fords&#x5C;u002Fr&#x5C;u002Faplicacoes&#x5C;u002Fportal-cred
 
 
 def _pendente(nup, processo, valor, enviar_texto="", agrupado=True):
-    analisar = f'<a href="{_dialogo(DETALHE.format(nup=nup))}" >ANALISAR</a>' if agrupado else ""
+    # Sem grupo, o portal deixa o link do detalhe sem o texto ANALISAR.
+    analisar = f'<a href="{_dialogo(DETALHE.format(nup=nup))}" >{"ANALISAR" if agrupado else ""}</a>'
     return (
         f'<tr><td class="t-Report-cell" headers="NU_NUP">{nup}</td>'
         f'<td class="t-Report-cell" headers="NU_ORDEM">{processo}</td>'
