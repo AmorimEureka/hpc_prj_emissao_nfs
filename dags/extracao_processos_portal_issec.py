@@ -30,7 +30,9 @@ AUTH_TIMEOUT_SECONDS = float(os.getenv("ISSEC_AUTH_TIMEOUT_SECONDS", "1800"))
         "portal do credenciado ISSEC e carrega raw_issec_portal com dlt."
     ),
     # Horário comercial: o login depende de um usuário resolver o captcha.
-    schedule=os.getenv("ISSEC_PORTAL_SCHEDULE", "0 8 * * 1-5"),
+    # Dias úteis às 08:00, 12:00 e 16:00 (pedido de 27/11/2026): pedidos de NF
+    # do convênio aparecem em até ~4 h. Cada execução pede captcha humano.
+    schedule=os.getenv("ISSEC_PORTAL_SCHEDULE", "0 8,12,16 * * 1-5"),
     start_date=pendulum.datetime(2026, 1, 1, tz="America/Fortaleza"),
     catchup=False,
     max_active_runs=1,

@@ -233,7 +233,7 @@ def test_dag_declara_id_agenda_e_conexao_oficial():
     }
     assert {
         "extracao_processos_portal_issec",
-        "0 8 * * 1-5",
+        "0 8,12,16 * * 1-5",
         "nfse_portal",
         "postgres_prontocardio",
     } <= strings
